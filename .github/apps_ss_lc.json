@@ -3,11 +3,27 @@
  "identifier": "com.livecontainer.source",
  "website": "https://github.com/LiveContainer/LiveContainer",
  "subtitle": "LiveContainer + SideStore 中文版源（fwx997）",
- "description": "此源仅作占位，不提供任何应用。LiveContainer+SideStore 为独立自签应用，重签时直接使用设备上的本机包（保持中文界面）。",
+ "description": "汉化版专用源。Resign/更新均使用汉化包。请勿添加官方源, 否则会覆盖为英文版。",
  "tintColor": "#0784FC",
  "iconURL": "https://raw.githubusercontent.com/LiveContainer/LiveContainer/main/screenshots/AppIcon1024.png",
  "headerURL": "https://raw.githubusercontent.com/LiveContainer/LiveContainer/main/screenshots/header.png",
- "apps": [],
+ "apps": [
+  {
+   "beta": false,
+   "name": "LiveContainer + SideStore",
+   "bundleIdentifier": "com.kdt.livecontainer",
+   "developerName": "fwx997 (Chinese localization)",
+   "subtitle": "简体中文全量汉化版",
+   "version": "3.8.10",
+   "versionDate": "2026-09-12T18:40:00+08:00",
+   "versionDescription": "LiveContainer + SideStore 简体中文全量汉化版 (1609条翻译)。\nResign/更新时会从此源下载汉化包, 保持中文界面。",
+   "downloadURL": "https://github.com/fwx997/LiveContainer/releases/download/zh-latest/LiveContainer%2BSideStore.ipa",
+   "localizedDescription": "Run iOS apps without actually installing them! (Chinese localized)",
+   "iconURL": "https://raw.githubusercontent.com/LiveContainer/LiveContainer/main/screenshots/AppIcon1024.png",
+   "tintColor": "#0784FC",
+   "size": 32642048
+  }
+ ],
  "news": [
   {
    "appID": "com.kdt.livecontainer",
