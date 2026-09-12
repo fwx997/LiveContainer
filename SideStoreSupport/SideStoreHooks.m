@@ -99,7 +99,28 @@ NSURL* SideStoreSource_hook_altStoreSourceURL(id self, SEL cmd) {
     static NSURL* sourceURL = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sourceURL = [NSURL URLWithString:@"https://cdn.jsdelivr.net/gh/fwx997/LiveContainer@main/.github/apps_ss_lc.json"];
+        // 候选源按优先级排列: jsDelivr(国内友好) -> ghfast镜像 -> raw(GitHub) -> Release资产
+        // 运行时探测第一个可达的, 单点失效自动切换
+        NSArray<NSString*> *candidates = @[
+            @"https://cdn.jsdelivr.net/gh/fwx997/LiveContainer@main/.github/apps_ss_lc.json",
+            @"https://ghfast.top/https://raw.githubusercontent.com/fwx997/LiveContainer/main/.github/apps_ss_lc.json",
+            @"https://raw.githubusercontent.com/fwx997/LiveContainer/main/.github/apps_ss_lc.json",
+            @"https://github.com/fwx997/LiveContainer/releases/download/zh-latest/apps_ss_lc.json"
+        ];
+        sourceURL = [NSURL URLWithString:candidates.firstObject];
+        for (NSString *urlString in candidates) {
+            NSURL *url = [NSURL URLWithString:urlString];
+            NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+            req.HTTPMethod = @"HEAD";
+            req.timeoutInterval = 4;
+            NSURLResponse *resp = nil;
+            NSError *err = nil;
+            [NSURLConnection sendSynchronousRequest:req returningResponse:&resp error:&err];
+            if (resp && [((NSHTTPURLResponse *)resp) statusCode] == 200) {
+                sourceURL = url;
+                break;
+            }
+        }
     });
     return sourceURL;
 }
