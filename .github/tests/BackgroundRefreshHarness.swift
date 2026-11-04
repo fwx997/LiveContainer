@@ -27,6 +27,9 @@ enum Fixture {
     static var interruptLaunching = false
     static var cancelLaunching = false
     static var finishImmediately = true
+    static var refreshBudget = 0.2
+    static var launchDelay: UInt64 = 0
+    static var replyDelay: UInt64 = 0
     static var requests: [String] = []
     static var extensionKilled = 0
 
@@ -41,6 +44,9 @@ enum Fixture {
         interruptLaunching = false
         cancelLaunching = false
         finishImmediately = true
+        refreshBudget = 0.2
+        launchDelay = 0
+        replyDelay = 0
         requests = []
         extensionKilled = 0
     }
@@ -103,6 +109,7 @@ final class FakeExtension {
     func setRequestCancellationBlock(_ callback: @escaping (UUID, Error?) -> Void) { cancellation = callback }
     func beginRequest(withInputItems items: [FakeExtensionItem]) async -> UUID {
         let identifier = UUID()
+        if Fixture.launchDelay > 0 { try? await Task.sleep(nanoseconds: Fixture.launchDelay) }
         if Fixture.interruptLaunching {
             interruption?(identifier)
             return identifier
@@ -130,6 +137,16 @@ final class TestClient: RefreshClient {
             if Fixture.finishImmediately {
                 Fixture.reporter?.finish(nil, requestIdentifier: requestIdentifier)
             }
+            if Fixture.replyDelay > 0 {
+                scheduleReply(requestIdentifier, reporter: Fixture.reporter, delay: Fixture.replyDelay)
+            }
+        }
+    }
+
+    private func scheduleReply(_ requestIdentifier: String, reporter: RefreshServer?, delay: UInt64) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: delay)
+            reporter?.finish(nil, requestIdentifier: requestIdentifier)
         }
     }
     func handleCellularCallback(_ url: URL) {}
@@ -213,7 +230,9 @@ enum Regression {
         await expectFailure({ Fixture.noBookmark = true }, containing: "data container")
         await expectFailure({ Fixture.interruptLaunching = true }, containing: "quit unexpectedly")
         await expectFailure({ Fixture.cancelLaunching = true }, containing: "Extension cancelled")
-        await expectFailure({ Fixture.noLaunchCallback = true }, containing: "failed to start")
+        await expectFailure({ Fixture.noLaunchCallback = true }, containing: "No refresh was started")
+        require(Fixture.requests.isEmpty, "A timed-out startup dispatched a refresh")
+        require(Fixture.extensionKilled > 0, "A timed-out startup leaked its extension")
     }
 
     @MainActor
@@ -260,12 +279,65 @@ enum Regression {
     }
 
     @MainActor
+    static func deadlineRegression() async throws {
+        Fixture.reset()
+        Fixture.refreshBudget = 0.6
+        Fixture.launchDelay = 400_000_000
+        Fixture.replyDelay = 400_000_000
+        Fixture.finishImmediately = false
+        let handler = RefreshHandler()
+        do {
+            try await refresh(handler)
+            fatalError("Cold startup time was excluded from the intent budget")
+        } catch {
+            require(error.localizedDescription.contains("may still be running"), "Unexpected deadline error: \(error)")
+        }
+        require(Fixture.requests.count == 1, "Expected one dispatched operation")
+        require(Fixture.extensionKilled == 0 && handler.client != nil, "Deadline killed the dispatched operation")
+        do {
+            try await refresh(handler)
+            fatalError("Accepted a second refresh while the detached request was running")
+        } catch {
+            require(error.localizedDescription.contains("Another refresh"), "Lost in-flight state")
+        }
+        try await Task.sleep(nanoseconds: 350_000_000)
+        Fixture.replyDelay = 0
+        Fixture.finishImmediately = true
+        try await refresh(handler)
+        require(Fixture.extensionKilled == 0, "The late result or old deadline killed the extension")
+    }
+
+    @MainActor
+    static func dispatchedCancellationRegression() async throws {
+        Fixture.reset()
+        Fixture.finishImmediately = false
+        let handler = RefreshHandler()
+        let pending = Task { @MainActor in try await refresh(handler) }
+        while Fixture.requests.isEmpty { await Task.yield() }
+        let requestIdentifier = Fixture.requests[0]
+        pending.cancel()
+        do {
+            try await pending.value
+            fatalError("Cancellation returned success")
+        } catch is CancellationError {}
+        require(Fixture.extensionKilled == 0 && handler.client != nil, "Cancellation killed an already dispatched refresh")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        require(Fixture.extensionKilled == 0, "A detached waiter's timer killed the refresh")
+        handler.finish(nil, requestIdentifier: requestIdentifier)
+        for _ in 0..<20 { await Task.yield() }
+        Fixture.finishImmediately = true
+        try await refresh(handler)
+    }
+
+    @MainActor
     static func main() async throws {
         setenv("LC_HOME_PATH", "/tmp", 1)
         try await completionRegressions()
         try await coordinatorRegressions()
         try await requestIdentityRegression()
         try await cancellationRegression()
+        try await deadlineRegression()
+        try await dispatchedCancellationRegression()
         print("Refresh lifecycle regressions passed")
     }
 }

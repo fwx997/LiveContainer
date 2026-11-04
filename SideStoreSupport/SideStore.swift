@@ -103,6 +103,13 @@ final class RefreshCompletion: @unchecked Sendable {
         continuation?.resume(with: result)
         return true
     }
+
+    func throwIfFailed() throws {
+        lock.lock()
+        let result = self.result
+        lock.unlock()
+        try result?.get()
+    }
 }
 
 private func refreshError(_ message: String) -> NSError {
@@ -116,6 +123,7 @@ class RefreshHandler: NSObject, RefreshServer {
     private var completion: RefreshCompletion?
     private var launchCompletion: RefreshCompletion?
     private var requestIdentifier: String?
+    private var didDispatchRefresh = false
     private var didFinishLaunching = false
     var progress: Progress? = nil
     var listener: NSXPCListener? = nil
@@ -141,6 +149,12 @@ class RefreshHandler: NSObject, RefreshServer {
     }
     
     func startRefresh(identifier: String, mangledName: String, progress: Progress) async throws {
+        // Leave headroom for the system's background intent budget, including cold
+        // startup. iOS can still suspend or cancel an intent sooner than this.
+        let deadline = DispatchTime.now() + 27
+        if didDispatchRefresh && (sideStorePid <= 0 || getpgid(sideStorePid) <= 0) {
+            failRefresh(refreshError("Built-in SideStore quit unexpectedly"))
+        }
         guard requestIdentifier == nil else {
             throw refreshError("Another refresh task is in progress.")
         }
@@ -149,26 +163,33 @@ class RefreshHandler: NSObject, RefreshServer {
         self.progress = progress
         let completion = RefreshCompletion()
         self.completion = completion
+        scheduleRefreshDeadline(deadline, requestIdentifier: requestIdentifier, completion: completion)
         defer {
-            self.requestIdentifier = nil
-            self.completion = nil
-            self.progress = nil
+            detachWaiter(for: requestIdentifier)
         }
 
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
             try await prepareRefresh()
             try Task.checkCancellation()
+            try completion.throwIfFailed()
+            if DispatchTime.now() >= deadline {
+                stopWaitingForRefresh(requestIdentifier: requestIdentifier)
+                try await completion.wait()
+            }
             guard let client else {
-                throw refreshError("Built-in SideStore did not establish its background connection.")
+                let error = refreshError("Built-in SideStore did not establish its background connection.")
+                failRefresh(error)
+                throw error
             }
             try await completion.wait {
+                self.didDispatchRefresh = true
                 client.refreshAllApps(withIdentifier: identifier, mangledTypeName: mangledName, requestIdentifier: requestIdentifier)
             }
         } onCancel: {
             Task { @MainActor in
                 guard self.requestIdentifier == requestIdentifier else { return }
-                self.failRefresh(CancellationError())
+                self.stopWaitingForRefresh(requestIdentifier: requestIdentifier, cancellation: true)
             }
         }
     }
@@ -238,7 +259,6 @@ class RefreshHandler: NSObject, RefreshServer {
                     self.failRefresh(error ?? refreshError("Built-in SideStore quit unexpectedly"))
                 }
             }
-            scheduleLaunchTimeout(for: ext, completion: launchCompletion)
             try await launchCompletion.wait {
                 Task { @MainActor in
                     await self.beginSideStoreRequest(ext, item: extensionItem)
@@ -263,12 +283,32 @@ class RefreshHandler: NSObject, RefreshServer {
         completeLaunchIfReady()
     }
 
-    private func scheduleLaunchTimeout(for ext: NSExtension, completion: RefreshCompletion) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 300) { [weak self, weak ext] in
-            guard let self, let ext, self.ext === ext, self.launchCompletion === completion else { return }
-            let error = refreshError("Built-in SideStore failed to start in reasonable time")
-            guard completion.finish(.failure(error)) else { return }
-            self.failRefresh(error)
+    private func scheduleRefreshDeadline(_ deadline: DispatchTime, requestIdentifier: String, completion: RefreshCompletion) {
+        DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
+            guard let self, self.requestIdentifier == requestIdentifier, self.completion === completion else { return }
+            self.stopWaitingForRefresh(requestIdentifier: requestIdentifier)
+        }
+    }
+
+    private func stopWaitingForRefresh(requestIdentifier: String, cancellation: Bool = false) {
+        guard self.requestIdentifier == requestIdentifier else { return }
+        if didDispatchRefresh {
+            // Ending the shortcut's wait must not kill the already dispatched
+            // operation. SideStore owns its final result notification and cleanup.
+            let error: Error = cancellation ? CancellationError() : refreshError("The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected and wait for SideStore's result notification.")
+            completion?.finish(.failure(error))
+            return
+        }
+        let error: Error = cancellation ? CancellationError() : refreshError("SideStore did not start before the shortcut's background time limit. No refresh was started. Open LiveContainer and try again.")
+        failRefresh(error)
+    }
+
+    private func detachWaiter(for requestIdentifier: String) {
+        guard self.requestIdentifier == requestIdentifier else { return }
+        completion = nil
+        progress = nil
+        if !didDispatchRefresh {
+            self.requestIdentifier = nil
         }
     }
 
@@ -294,6 +334,11 @@ class RefreshHandler: NSObject, RefreshServer {
         launchCompletion?.finish(.failure(error))
         completion?.finish(.failure(error))
         launchCompletion = nil
+        didDispatchRefresh = false
+        if completion == nil {
+            requestIdentifier = nil
+        }
+        progress = nil
         resetConnection()
     }
 
@@ -309,6 +354,10 @@ class RefreshHandler: NSObject, RefreshServer {
             guard self.requestIdentifier == requestIdentifier else { return }
             let result: Result<Void, Error> = error.map { .failure(refreshError($0)) } ?? .success(())
             self.completion?.finish(result)
+            self.didDispatchRefresh = false
+            self.requestIdentifier = nil
+            self.completion = nil
+            self.progress = nil
         }
     }
 

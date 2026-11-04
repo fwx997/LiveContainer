@@ -28,7 +28,7 @@ def production_coordinator():
         "UNNotificationRequest": "FakeNotificationRequest",
         "UNUserNotificationCenter": "FakeNotificationCenter",
         "Bundle(": "FakeBundle(",
-        ".now() + 300": ".now() + 0.2",
+        "DispatchTime.now() + 27": "DispatchTime.now() + Fixture.refreshBudget",
     }
     for original, replacement in substitutions.items():
         source = source.replace(original, replacement)

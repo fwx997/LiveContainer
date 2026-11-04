@@ -188,6 +188,40 @@
         }
       }
     },
+    "The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected and wait for SideStore's result notification.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected and wait for SideStore's result notification."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快捷指令已停止等待 SideStore，续签可能仍在后台进行。请保持本地 VPN 连接，等待 SideStore 的最终结果通知。"
+          }
+        }
+      }
+    },
+    "SideStore did not start before the shortcut's background time limit. No refresh was started. Open LiveContainer and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SideStore did not start before the shortcut's background time limit. No refresh was started. Open LiveContainer and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SideStore 未能在快捷指令的后台等待时限内启动，本次未开始续签。请打开 LiveContainer 后重试。"
+          }
+        }
+      }
+    },
     "All apps have been refreshed.": {
       "extractionState": "manual",
       "localizations": {
