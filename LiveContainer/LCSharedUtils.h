@@ -17,4 +17,6 @@
 + (NSString*)findDefaultContainerWithBundleId:(NSString*)bundleId;
 + (NSArray<NSString*>*)lcUnorderedUrlSchemes;
 + (NSArray<NSString*>*)lcUrlSchemes;
++ (BOOL)handleSideStoreCellularCallback:(NSURL*)url;
++ (void)recoverPendingSideStoreCellularData;
 @end

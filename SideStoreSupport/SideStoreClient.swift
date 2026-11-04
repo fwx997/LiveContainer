@@ -66,7 +66,8 @@ struct SideStoreIntentCaller {
     
     // call this when no IntentContext exists (when sidestore is loaded in LiveProcess)
     func callRefreshIntent2(identifier: String, mangledTypeName: String, progressCallback: (Progress)->Void ) async throws {
-        try await withUnsafeThrowingContinuation { (c: UnsafeContinuation<(), any Error>) in
+        let completion = RefreshCompletion()
+        try await completion.wait {
             let parent = PrivateIntentRunner.run(
                         identifier: identifier,
                         mangledTypeName: mangledTypeName
@@ -74,9 +75,9 @@ struct SideStoreIntentCaller {
                         print("performAction result=\(String(describing: result)), " +
                               "error=\(String(describing: error))")
                         if let error {
-                            c.resume(throwing: error)
+                            completion.finish(.failure(error))
                         } else {
-                            c.resume()
+                            completion.finish(.success(()))
                         }
                     }
             if let parent {
@@ -88,24 +89,27 @@ struct SideStoreIntentCaller {
 
 @available(iOS 17.0, *)
 @objc extension SideStoreClient {
-    @objc(performRefreshForRealWithIdentifier:mangledTypeName:server:)
-    func performRefreshForReal(identifier: String, mangledTypeName: String, server: any RefreshServer) {
+    @objc(performRefreshForRealWithIdentifier:mangledTypeName:requestIdentifier:server:)
+    func performRefreshForReal(identifier: String, mangledTypeName: String, requestIdentifier: String, server: any RefreshServer) {
         Task {
+            var obs: NSKeyValueObservation? = nil
+            defer { obs?.invalidate() }
             do {
-                var obs: NSKeyValueObservation? = nil
                 try await SideStoreIntentCaller.shared.callRefreshIntent2(identifier: identifier, mangledTypeName: mangledTypeName) { progress in
-                    obs = progress.observe(\.fractionCompleted, options: [.new]) { progress, change in
-                        if let newValue = change.newValue {
-                            server.updateProgress(newValue)
-                        }
-                    }
+                    obs = observeRefreshProgress(progress, server: server)
                 }
-                obs?.invalidate()
-                server.finish(nil)
+                server.finish(nil, requestIdentifier: requestIdentifier)
             } catch {
-                server.finish(error.localizedDescription)
+                server.finish(error.localizedDescription, requestIdentifier: requestIdentifier)
             }
         }
     }
 
+}
+
+private func observeRefreshProgress(_ progress: Progress, server: any RefreshServer) -> NSKeyValueObservation {
+    progress.observe(\.fractionCompleted, options: [.new]) { _, change in
+        guard let value = change.newValue else { return }
+        server.updateProgress(value)
+    }
 }

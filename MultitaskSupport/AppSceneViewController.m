@@ -31,6 +31,18 @@
 
 @implementation AppSceneViewController
 
+static __weak AppSceneViewController *cellularSideStoreScene;
+
++ (BOOL)deliverSideStoreCellularCallback:(NSURL*)url {
+    AppSceneViewController *scene = cellularSideStoreScene;
+    if (!scene.isAppRunning || !scene.presenter) {
+        return NO;
+    }
+    // Reuse the live guest scene; callbacks must not create a new refresh or app.
+    [scene openURLScheme:url.absoluteString];
+    return YES;
+}
+
 
 - (instancetype)initWithBundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID delegate:(id<AppSceneViewControllerDelegate>)delegate {
     self = [super initWithNibName:nil bundle:nil];
@@ -220,6 +232,9 @@
         [self.contentView addSubview:self.presenter.presentationView];
     }
     [self.view addSubview:_contentView];
+    if ([self.bundleId isEqualToString:@"builtinSideStore"]) {
+        cellularSideStoreScene = self;
+    }
     
     // If we have a staging URL scheme, pass it now
     NSString *launchUrl = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];

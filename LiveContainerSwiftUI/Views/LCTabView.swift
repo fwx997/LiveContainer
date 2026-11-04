@@ -112,9 +112,17 @@ struct LCTabView: View {
         .onOpenURL { url in
             dispatchURL(url: url)
         }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                LCSharedUtils.recoverPendingSideStoreCellularData()
+            }
+        }
     }
     
     func dispatchURL(url: URL) {
+        if LCSharedUtils.handleSideStoreCellularCallback(url) {
+            return
+        }
         repeat {
             if url.isFileURL {
                 sharedModel.selectedTab = .apps

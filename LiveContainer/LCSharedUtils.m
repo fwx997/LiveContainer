@@ -2,6 +2,7 @@
 #import "FoundationPrivate.h"
 #import "UIKitPrivate.h"
 #import "utils.h"
+#import <objc/message.h>
 @import MachO;
 
 extern NSUserDefaults *lcUserDefaults;
@@ -12,6 +13,52 @@ NSString* FBSOpenApplicationOptionKeyActivateAsClassic = @"__ActivateAsClassic";
 NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 
 @implementation LCSharedUtils
+
++ (BOOL)handleSideStoreCellularCallback:(NSURL*)url {
+    if (![url.scheme.lowercaseString isEqualToString:lcAppUrlScheme.lowercaseString] ||
+        ![url.host.lowercaseString isEqualToString:@"cellular-refresh"]) {
+        return NO;
+    }
+
+    Class bridge = NSClassFromString(@"SSCellularRefreshBridge");
+    SEL selector = NSSelectorFromString(@"handleCallback:");
+    if ([bridge respondsToSelector:selector] &&
+        ((BOOL (*)(id, SEL, NSURL*))objc_msgSend)(bridge, selector, url)) {
+        return YES;
+    }
+
+    Class appSceneClass = NSClassFromString(@"AppSceneViewController");
+    selector = NSSelectorFromString(@"deliverSideStoreCellularCallback:");
+    if ([appSceneClass respondsToSelector:selector]) {
+        ((BOOL (*)(id, SEL, NSURL*))objc_msgSend)(appSceneClass, selector, url);
+    }
+
+    // A guest scene delivers asynchronously. Also notify the background client;
+    // only the SideStore instance with the matching one-use token accepts it.
+    // A cold callback is consumed without launching another refresh; SideStore keeps
+    // its recovery marker until the user next opens SideStore in the foreground.
+    Class refreshHandler = NSClassFromString(@"LCRefreshHandler");
+    selector = NSSelectorFromString(@"handleCellularCallback:");
+    if ([refreshHandler respondsToSelector:selector]) {
+        ((void (*)(id, SEL, NSURL*))objc_msgSend)(refreshHandler, selector, url);
+    }
+    return YES;
+}
+
++ (void)recoverPendingSideStoreCellularData {
+    Class bridge = NSClassFromString(@"SSCellularRefreshBridge");
+    SEL selector = NSSelectorFromString(@"recoverPendingData");
+    if ([bridge respondsToSelector:selector]) {
+        ((void (*)(id, SEL))objc_msgSend)(bridge, selector);
+        return;
+    }
+
+    Class refreshHandler = NSClassFromString(@"LCRefreshHandler");
+    selector = NSSelectorFromString(@"recoverPendingCellularData");
+    if ([refreshHandler respondsToSelector:selector]) {
+        ((void (*)(id, SEL))objc_msgSend)(refreshHandler, selector);
+    }
+}
 
 + (NSString*) teamIdentifier {
     static NSString* ans = nil;

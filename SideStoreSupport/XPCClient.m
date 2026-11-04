@@ -8,11 +8,13 @@
 #include "XPCServer.h"
 #include "../LiveContainer/utils.h"
 #include "../LiveContainer/LCSharedUtils.h"
+#include <objc/message.h>
 @import UIKit;
 
 @interface SideStoreClient(Swift)
 - (void)performRefreshForRealWithIdentifier:(NSString*)identifier
                             mangledTypeName:(NSString*)mangledTypeName
+                          requestIdentifier:(NSString*)requestIdentifier
                                      server:(id <RefreshServer> _Nonnull)server;
 
 @end
@@ -60,11 +62,27 @@ void installSideStoreHooks(void);
     [LCSharedUtils launchToGuestAppWithClassicMode:0];
 }
 
-- (void)refreshAllAppsWithIdentifier:(NSString*)identifier mangledTypeName:(NSString *)mangledTypeName {
+- (void)refreshAllAppsWithIdentifier:(NSString*)identifier mangledTypeName:(NSString *)mangledTypeName requestIdentifier:(NSString*)requestIdentifier {
     if(!handler) {
         return;
     }
-    [self performRefreshForRealWithIdentifier:identifier mangledTypeName:mangledTypeName server:handler.server];
+    [self performRefreshForRealWithIdentifier:identifier mangledTypeName:mangledTypeName requestIdentifier:requestIdentifier server:handler.server];
+}
+
+- (void)handleCellularCallback:(NSURL*)url {
+    Class bridge = NSClassFromString(@"SSCellularRefreshBridge");
+    SEL selector = NSSelectorFromString(@"handleCallback:");
+    if ([bridge respondsToSelector:selector]) {
+        ((BOOL (*)(id, SEL, NSURL*))objc_msgSend)(bridge, selector, url);
+    }
+}
+
+- (void)recoverPendingCellularData {
+    Class bridge = NSClassFromString(@"SSCellularRefreshBridge");
+    SEL selector = NSSelectorFromString(@"recoverPendingData");
+    if ([bridge respondsToSelector:selector]) {
+        ((void (*)(id, SEL))objc_msgSend)(bridge, selector);
+    }
 }
 
 @end

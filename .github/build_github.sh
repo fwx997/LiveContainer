@@ -1,3 +1,6 @@
+# Verify the refresh lifecycle on the selected Xcode before packaging either IPA.
+python3 .github/tests/test_background_refresh.py --require-swift -v || exit $?
+
 # copy lc
 wget https://github.com/LiveContainer/dylibify/releases/download/1.0/dylibify
 chmod +x dylibify

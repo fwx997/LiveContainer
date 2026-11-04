@@ -1,0 +1,210 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Another refresh task is in progress.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another refresh task is in progress."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个续签任务正在进行中。"
+          }
+        }
+      }
+    },
+    "Built-in SideStore did not establish its background connection.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Built-in SideStore did not establish its background connection."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内置 SideStore 未能建立后台连接，请重试。"
+          }
+        }
+      }
+    },
+    "The SideStore background connection could not be created.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The SideStore background connection could not be created."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法创建 SideStore 后台连接，请重试。"
+          }
+        }
+      }
+    },
+    "Unable to access SideStore's data container for background refresh.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to access SideStore's data container for background refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台续签无法访问 SideStore 的数据目录，请打开内置 SideStore 后重试。"
+          }
+        }
+      }
+    },
+    "Background refresh needs LiveProcess. Reinstall LiveContainer+SideStore and keep its app extensions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Background refresh needs LiveProcess. Reinstall LiveContainer+SideStore and keep its app extensions."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台续签需要 LiveProcess。请重新安装 LiveContainer+SideStore，并保留应用扩展。"
+          }
+        }
+      }
+    },
+    "LiveProcess could not start. Reinstall LiveContainer+SideStore and keep its app extensions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveProcess could not start. Reinstall LiveContainer+SideStore and keep its app extensions."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveProcess 无法启动。请重新安装 LiveContainer+SideStore，并保留应用扩展。"
+          }
+        }
+      }
+    },
+    "Built-in SideStore failed to start in reasonable time": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Built-in SideStore failed to start in reasonable time"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内置 SideStore 启动超时，请打开应用后重试。"
+          }
+        }
+      }
+    },
+    "Built-in SideStore quit unexpectedly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Built-in SideStore quit unexpectedly"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内置 SideStore 意外退出，请重试。"
+          }
+        }
+      }
+    },
+    "Refresh Apps via Widget": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Apps via Widget"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通过小组件续签应用"
+          }
+        }
+      }
+    },
+    "Refresh All Apps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh All Apps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "续签所有应用"
+          }
+        }
+      }
+    },
+    "Refreshes your sideloaded apps to prevent them from expiring.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refreshes your sideloaded apps to prevent them from expiring."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "续签侧载应用，避免签名过期。"
+          }
+        }
+      }
+    },
+    "All apps have been refreshed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All apps have been refreshed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有应用均已续签。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -417,6 +417,10 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
         return LCControlAppURLHandlingPassThrough;
     }
 
+    if ([LCSharedUtils handleSideStoreCellularCallback:url]) {
+        return LCControlAppURLHandlingStop;
+    }
+
     // pass through sidestore urls
     if(NSUserDefaults.isSideStore && ![url.scheme isEqualToString:@"livecontainer"]) {
         return LCControlAppURLHandlingPassThrough;

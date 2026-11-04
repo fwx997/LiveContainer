@@ -159,6 +159,9 @@ struct MultitaskAppWindow: View {
             }
             .ignoresSafeArea(.all, edges: .all)
             .navigationTitle(Text("\(appInfo.displayName) - \(String(pid))"))
+            .onOpenURL { url in
+                _ = LCSharedUtils.handleSideStoreCellularCallback(url)
+            }
             .onReceive(pub) { out in
                 if let scene1 = sceneDelegate.window?.windowScene, let scene2 = out.object as? UIWindowScene, scene1 == scene2 {
                     show = false

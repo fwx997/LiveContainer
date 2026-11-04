@@ -11,7 +11,7 @@
 __attribute__((swift_attr("@Sendable")))
 @protocol RefreshServer
 - (void)updateProgress:(double)value;
-- (void)finish:(NSString*)error;
+- (void)finish:(NSString*)error requestIdentifier:(NSString*)requestIdentifier;
 - (void)onConnection:(NSXPCConnection*)connection;
 - (void)finishedLaunching;
 - (void)addNotificationRequest:(UNNotificationRequest*)request;
@@ -19,7 +19,9 @@ __attribute__((swift_attr("@Sendable")))
 @end
 
 @protocol RefreshClient
-- (void)refreshAllAppsWithIdentifier:(NSString*)identifier mangledTypeName:(NSString *)mangledTypeName;
+- (void)refreshAllAppsWithIdentifier:(NSString*)identifier mangledTypeName:(NSString *)mangledTypeName requestIdentifier:(NSString*)requestIdentifier;
+- (void)handleCellularCallback:(NSURL*)url;
+- (void)recoverPendingCellularData;
 @end
 
 @interface LiveProcessSideStoreHandler : NSObject

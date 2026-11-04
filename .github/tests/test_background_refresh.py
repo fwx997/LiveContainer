@@ -1,0 +1,91 @@
+"""Execute the production refresh coordinator against deterministic XPC substitutes."""
+
+import argparse
+import json
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = ROOT / "SideStoreSupport" / "SideStore.swift"
+
+
+def production_coordinator():
+    source = SOURCE.read_text(encoding="utf-8")
+    source = source[source.index("// A reply can arrive synchronously") :]
+    source = re.sub(r"^\s*@objc(?:\([^\n]*\))?\s*$", "", source, flags=re.MULTILINE)
+    substitutions = {
+        "NSXPCListener": "FakeListener",
+        "NSXPCConnection": "FakeConnection",
+        "NSXPCInterface": "FakeInterface",
+        "NSExtensionItem": "FakeExtensionItem",
+        "NSExtension": "FakeExtension",
+        "UNNotificationRequest": "FakeNotificationRequest",
+        "UNUserNotificationCenter": "FakeNotificationCenter",
+        "Bundle(": "FakeBundle(",
+        ".now() + 300": ".now() + 0.2",
+    }
+    for original, replacement in substitutions.items():
+        source = source.replace(original, replacement)
+    return source
+
+
+def production_method(source, signature):
+    start = source.index(signature)
+    opening = source.index("{", start)
+    depth = 1
+    cursor = opening + 1
+    while depth:
+        depth += (source[cursor] == "{") - (source[cursor] == "}")
+        cursor += 1
+    return source[start:cursor]
+
+
+class BackgroundRefreshTests(unittest.TestCase):
+    def test_english_and_chinese_error_resources(self):
+        catalog = json.loads((ROOT / "SideStoreSupport/Localizable.xcstrings").read_text(encoding="utf-8"))
+        messages = set(re.findall(r'refreshError\("([^"\\]+)"\)', SOURCE.read_text(encoding="utf-8")))
+        self.assertGreater(len(messages), 5)
+        for message in messages:
+            translations = catalog["strings"][message]["localizations"]
+            self.assertEqual(translations["en"]["stringUnit"]["value"], message)
+            self.assertTrue(translations["zh-Hans"]["stringUnit"]["value"])
+
+    @unittest.skipUnless(shutil.which("swiftc"), "swiftc is required to execute the production Swift coordinator")
+    def test_production_refresh_lifecycle(self):
+        harness = Path(__file__).with_name("BackgroundRefreshHarness.swift").read_text(encoding="utf-8")
+        combined = harness.replace("// INSERT_PRODUCTION_COORDINATOR", production_coordinator())
+        with tempfile.TemporaryDirectory(prefix="lc-refresh-tests-") as directory:
+            source = Path(directory) / "RefreshHarness.swift"
+            executable = Path(directory) / "RefreshHarness"
+            source.write_text(combined, encoding="utf-8")
+            subprocess.run(["swiftc", "-swift-version", "5", "-parse-as-library", str(source), "-o", str(executable)], check=True, timeout=120)
+            subprocess.run([str(executable)], check=True, timeout=30)
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "macOS Foundation is required for the Objective-C routing checks")
+    def test_production_callback_routes(self):
+        source = (ROOT / "LiveContainer/LCSharedUtils.m").read_text(encoding="utf-8")
+        method = production_method(source, "+ (BOOL)handleSideStoreCellularCallback:")
+        harness = Path(__file__).with_name("CellularCallbackHarness.m").read_text(encoding="utf-8")
+        combined = harness.replace("// INSERT_PRODUCTION_ROUTER", method)
+        with tempfile.TemporaryDirectory(prefix="lc-callback-tests-") as directory:
+            source = Path(directory) / "CallbackHarness.m"
+            executable = Path(directory) / "CallbackHarness"
+            source.write_text(combined, encoding="utf-8")
+            subprocess.run(["clang", "-fobjc-arc", "-framework", "Foundation", str(source), "-o", str(executable)], check=True, timeout=60)
+            for scenario in ["direct", "direct-stale", "foreground", "background", "cold", "wrong-scheme", "wrong-host"]:
+                subprocess.run([str(executable), scenario], check=True, timeout=10)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--require-swift", action="store_true")
+    args, remaining = parser.parse_known_args()
+    if args.require_swift and not shutil.which("swiftc"):
+        parser.error("swiftc is required for the CI regression checks")
+    unittest.main(argv=[__file__, *remaining])
