@@ -27,11 +27,11 @@ def production_coordinator():
         "NSExtension": "FakeExtension",
         "UNNotificationRequest": "FakeNotificationRequest",
         "UNUserNotificationCenter": "FakeNotificationCenter",
-        "Bundle(": "FakeBundle(",
         "DispatchTime.now() + 27": "DispatchTime.now() + Fixture.refreshBudget",
     }
     for original, replacement in substitutions.items():
         source = source.replace(original, replacement)
+    source = re.sub(r"\bBundle(?=\s*\()", "FakeBundle", source)
     return source
 
 
