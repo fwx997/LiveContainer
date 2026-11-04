@@ -417,7 +417,7 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
         return LCControlAppURLHandlingPassThrough;
     }
 
-    if ([LCSharedUtils handleSideStoreCellularCallback:url]) {
+    if ([NSClassFromString(@"LCSharedUtils") handleSideStoreCellularCallback:url]) {
         return LCControlAppURLHandlingStop;
     }
 
