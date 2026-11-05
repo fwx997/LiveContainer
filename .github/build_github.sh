@@ -1,9 +1,15 @@
+#!/bin/sh
+set -eu
+
 # Verify the refresh lifecycle on the selected Xcode before packaging either IPA.
 python3 .github/tests/test_background_refresh.py --require-swift -v || exit $?
+python3 -m unittest discover -s .github/tests -p test_ipa_packaging.py -v
 
-# copy lc
-wget https://github.com/LiveContainer/dylibify/releases/download/1.0/dylibify
-chmod +x dylibify
+# Build the same pinned converter for the runner's own CPU architecture.
+# The release download is ARM-only and cannot execute on Intel runners.
+DYLIBIFY_REF="5daf713df9fb07724510490c88aa8e00061be14a"
+wget -q "https://raw.githubusercontent.com/LiveContainer/dylibify/${DYLIBIFY_REF}/main.m" -O dylibify-main.m
+xcrun --sdk macosx clang dylibify-main.m -framework Foundation -fobjc-arc -o dylibify
 brew install ldid
 
 # move lc to working folder
@@ -55,7 +61,7 @@ cd ..
 # SideStore
 mv ./tmp/Payload/SideStore.app ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework
 ./dylibify ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore.dylib
-rm ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
+python3 .github/verify_ipa.py dylib ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore.dylib
 mv ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore.dylib ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 ldid -S"" ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/SideStore
 cp ./.github/sidelc/LCAppInfo.plist ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/
@@ -74,10 +80,11 @@ mv ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/PlugIns/AltWidg
 mv ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/AltWidgetExtension ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/LiveWidgetExtension
 
 # Sign
-rm -r .zsign_cache
-find payloadlc/Payload -type d -name "_CodeSignature" -exec rm -r {} +
+rm -rf .zsign_cache
+find Payload -type d -name "_CodeSignature" -prune -exec rm -rf {} +
 
 ldid -S.github/sidelc/LiveWidgetExtension_adhoc.xml ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/LiveWidgetExtension
 
 # package
 zip -r "$scheme+SideStore.ipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX"
+python3 .github/verify_ipa.py combined "$scheme+SideStore.ipa" tmp/SideStore.ipa
