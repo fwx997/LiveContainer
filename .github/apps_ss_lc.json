@@ -14,14 +14,14 @@
    "bundleIdentifier": "com.kdt.livecontainer",
    "developerName": "fwx997 (Chinese localization)",
    "subtitle": "简体中文全量汉化版",
-   "version": "3.8.10",
-   "versionDate": "2026-09-12T18:40:00+08:00",
-   "versionDescription": "LiveContainer + SideStore 简体中文全量汉化版 (1609条翻译)。\nResign/更新时会从此源下载汉化包, 保持中文界面。",
+   "version": "3.8.11",
+   "versionDate": "2026-11-06T21:34:50+08:00",
+   "versionDescription": "LiveContainer 3.8.11 + SideStore 0.7.0-20261106.18。\n新增 VPN 自动跳转设置，默认开启；缺少 VPN 时明确提示，返回后再次手动操作可立即跳转。支持 LocalDevVPN、快捷指令选择本机 VPN 和自定义启动链接。\n保留原 Refresh All Apps 后台刷新流程，并包含快捷指令证书上下文、蜂窝恢复和配对修复。",
    "downloadURL": "https://github.com/fwx997/LiveContainer/releases/download/zh-latest/LiveContainer%2BSideStore.ipa",
    "localizedDescription": "Run iOS apps without actually installing them! (Chinese localized)",
    "iconURL": "https://raw.githubusercontent.com/LiveContainer/LiveContainer/main/screenshots/AppIcon1024.png",
    "tintColor": "#0784FC",
-   "size": 32642048
+   "size": 36005338
   }
  ],
  "news": [
