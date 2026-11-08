@@ -2,6 +2,10 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <dispatch/dispatch.h>
 
+// CoreGraphics can load QuartzCore on macOS; keep the test double's runtime
+// class distinct from the real CALayer while production calls remain verbatim.
+#define CALayer LCOrientationTestLayer
+
 // UIKit and animations are test dependencies. The host policy and window
 // lifecycle methods below are extracted verbatim from the production sources.
 typedef NS_ENUM(NSInteger, UIInterfaceOrientation) {

@@ -1,6 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+// Foundation can load CoreAutoLayout; do not register a duplicate system class.
+#define NSLayoutConstraint LCWindowTestLayoutConstraint
+
 // INSERT_WINDOW_BAR_METRICS
 
 // Minimal host views let the production layout run after a guest stops invoking

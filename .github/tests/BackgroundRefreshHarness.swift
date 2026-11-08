@@ -162,6 +162,12 @@ final class FakeNotificationCenter {
 
 // INSERT_PRODUCTION_COORDINATOR
 
+// Same-file test access lets us observe completion without assuming that an
+// arbitrary number of Task.yield calls has drained the main actor's queue.
+extension RefreshHandler {
+    var hasPendingRequestForTests: Bool { requestIdentifier != nil }
+}
+
 @main
 enum Regression {
     static func require(_ condition: @autoclosure () -> Bool, _ message: String) {
@@ -171,6 +177,15 @@ enum Regression {
     @MainActor
     static func refresh(_ handler: RefreshHandler) async throws {
         try await handler.startRefresh(identifier: "RefreshAllIntent", mangledName: "test", progress: Progress(totalUnitCount: 100))
+    }
+
+    @MainActor
+    static func waitForIdle(_ handler: RefreshHandler) async throws {
+        let deadline = DispatchTime.now() + 2
+        while handler.hasPendingRequestForTests {
+            require(DispatchTime.now() < deadline, "Delivered refresh result did not clear the pending request")
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
 
     @MainActor
@@ -300,7 +315,7 @@ enum Regression {
         } catch {
             require(error.localizedDescription.contains("Another refresh"), "Lost in-flight state")
         }
-        try await Task.sleep(nanoseconds: 350_000_000)
+        try await waitForIdle(handler)
         Fixture.replyDelay = 0
         Fixture.finishImmediately = true
         try await refresh(handler)
@@ -324,7 +339,7 @@ enum Regression {
         try await Task.sleep(nanoseconds: 300_000_000)
         require(Fixture.extensionKilled == 0, "A detached waiter's timer killed the refresh")
         handler.finish(nil, requestIdentifier: requestIdentifier)
-        for _ in 0..<20 { await Task.yield() }
+        try await waitForIdle(handler)
         Fixture.finishImmediately = true
         try await refresh(handler)
     }
