@@ -198,26 +198,45 @@ extension UTType {
 }
 
 extension Color {
+    func contrastingTextColor(in colorScheme: ColorScheme) -> Color {
+        let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
+        return Color(uiColor: UIColor(self).contrastingTextColor(in: traits))
+    }
+
     func readableTextColor() -> Color {
         let color = Color(.systemBackground)
         let percentage = 0.5
         
         // https://stackoverflow.com/a/78649412
-        let components1 = UIColor(self).cgColor.components!
+        // getRed also handles grayscale colors, whose CGColor has only two components.
+        var sourceR: CGFloat = 0, sourceG: CGFloat = 0, sourceB: CGFloat = 0, sourceA: CGFloat = 0
+        guard UIColor(self).getRed(&sourceR, green: &sourceG, blue: &sourceB, alpha: &sourceA) else { return .primary }
         var bgR: CGFloat = 0, bgG: CGFloat = 0, bgB: CGFloat = 0, bgA: CGFloat = 0
         UIColor(color).getRed(&bgR, green: &bgG, blue: &bgB, alpha: &bgA)
-        var red = (1.0 - percentage) * components1[0] + percentage * bgR
-        var green = (1.0 - percentage) * components1[1] + percentage * bgG
-        var blue = (1.0 - percentage) * components1[2] + percentage * bgB
-        //var alpha = (1.0 - percentage) * components1[3] + percentage * bgA
-        //UIColor(mix(with: Color(.systemBackground), by: 0.5)).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        var red = (1.0 - percentage) * sourceR + percentage * bgR
+        var green = (1.0 - percentage) * sourceG + percentage * bgG
+        var blue = (1.0 - percentage) * sourceB + percentage * bgB
         
         let brightness = (0.2126*red + 0.7152*green + 0.0722*blue);
         let brightnessOffset = brightness < 0.5 ? 0.4 : -0.4
-        red = min(Double(red) + brightnessOffset, 1.0)
-        green = min(Double(green) + brightnessOffset, 1.0)
-        blue = min(Double(blue) + brightnessOffset, 1.0)
+        red = max(0, min(Double(red) + brightnessOffset, 1.0))
+        green = max(0, min(Double(green) + brightnessOffset, 1.0))
+        blue = max(0, min(Double(blue) + brightnessOffset, 1.0))
         return Color(red: red, green: green, blue: blue)
+    }
+}
+
+extension UIColor {
+    // zh-patch: Dynamic app/source colors can be very light; choose a legible foreground.
+    func contrastingTextColor(in traits: UITraitCollection) -> UIColor {
+        let color = resolvedColor(with: traits)
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return .label }
+        func linear(_ component: CGFloat) -> CGFloat {
+            component <= 0.04045 ? component / 12.92 : pow((component + 0.055) / 1.055, 2.4)
+        }
+        let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+        return luminance > 0.179 ? .black : .white
     }
 }
 

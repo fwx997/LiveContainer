@@ -999,7 +999,7 @@ private struct LCSourceAppBanner: View {
                         if app.isBeta {
                             Text("lc.sources.badge.beta".loc.uppercased())
                                 .font(.system(size: 9, weight: .heavy))
-                                .foregroundColor(.white)
+                                .foregroundColor(Color.orange.contrastingTextColor(in: colorScheme))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(Capsule().fill(Color.orange))
@@ -1024,7 +1024,7 @@ private struct LCSourceAppBanner: View {
             } label: {
                 Text("lc.common.install".loc)
                     .bold()
-                    .foregroundColor(.white)
+                    .foregroundColor(primaryColor.contrastingTextColor(in: colorScheme))
                     .lineLimit(1)
                     .frame(height: 32)
                     .minimumScaleFactor(0.1)

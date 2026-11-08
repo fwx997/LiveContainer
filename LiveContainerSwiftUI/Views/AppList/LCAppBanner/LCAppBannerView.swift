@@ -148,13 +148,13 @@ final class LCAppBannerRootView: UIView {
         containerLabel.textColor = textColor
 
         sharedBadge.isHidden = !model.uiIsShared
-        sharedBadge.backgroundColor = UIColor(named: "BadgeColor") ?? .systemOrange
+        sharedBadge.setColor(UIColor(named: "BadgeColor") ?? .systemOrange, traits: traitCollection)
         jitBadge.isHidden = !model.uiIsJITNeeded || model.uiIs32bit
-        jitBadge.backgroundColor = UIColor(named: "JITBadgeColor") ?? .systemPurple
+        jitBadge.setColor(UIColor(named: "JITBadgeColor") ?? .systemPurple, traits: traitCollection)
         lockBadge.isHidden = !model.uiIsLocked || model.uiIsHidden
-        lockBadge.backgroundColor = UIColor(named: "BadgeColor") ?? .systemOrange
+        lockBadge.setColor(UIColor(named: "BadgeColor") ?? .systemOrange, traits: traitCollection)
         bit32Badge.isHidden = !model.uiIs32bit
-        bit32Badge.backgroundColor = UIColor(named: "32BitBadgeColor") ?? .systemBlue
+        bit32Badge.setColor(UIColor(named: "32BitBadgeColor") ?? .systemBlue, traits: traitCollection)
 
         visualBackgroundView.backgroundColor = dynamicColors
             ? mainColor.withAlphaComponent(0.5)
@@ -262,6 +262,13 @@ final class LCAppBannerRootView: UIView {
 
 private final class LCAppBannerBadgeView: UIView {
     private let contentView: UIView
+
+    func setColor(_ color: UIColor, traits: UITraitCollection) {
+        backgroundColor = color
+        let foreground = color.contrastingTextColor(in: traits)
+        contentView.tintColor = foreground
+        (contentView as? UILabel)?.textColor = foreground
+    }
 
     convenience init(symbolName: String) {
         let imageView = UIImageView(image: UIImage(
@@ -389,6 +396,7 @@ final class LCAppBannerRunControl: UIControl {
     func update(color: UIColor, isSigning: Bool, progress: Double, isEnabled: Bool) {
         self.progress = min(max(progress, 0), 1)
         self.isEnabled = isEnabled
+        titleLabel.textColor = color.contrastingTextColor(in: traitCollection)
 
         baseLayer.backgroundColor = color.withAlphaComponent(isSigning ? 0.2 : 1).cgColor
         progressCircleLayer.backgroundColor = color.cgColor
