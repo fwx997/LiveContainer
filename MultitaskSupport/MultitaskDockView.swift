@@ -286,7 +286,11 @@ class AppInfoProvider {
     
     override init() {
         super.init()
-        keyWindow!.rootViewController!.view.subviews.first!.addSubview(self.windowHostingView)
+        let rootView = keyWindow!.rootViewController!.view!
+        // Keep guest windows outside the main tab/navigation hierarchy so its
+        // Liquid Glass controls cannot react to touches on a covering window.
+        windowHostingView.frame = rootView.bounds
+        rootView.addSubview(windowHostingView)
         setupDockView()
         NotificationCenter.default.addObserver(
             self,
