@@ -109,6 +109,9 @@ class BackgroundRefreshTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    # The existing combined-build workflow runs this entry point directly.
+    from test_orientation_bridge import OrientationBridgeTests
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--require-swift", action="store_true")
     args, remaining = parser.parse_known_args()

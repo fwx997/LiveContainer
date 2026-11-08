@@ -6,8 +6,13 @@
 //
 @import UIKit;
 
+@class DecoratedAppSceneViewController;
+
 API_AVAILABLE(ios(16.0))
 @interface VirtualWindowsHostView: UIView
 @property(nonatomic) BOOL shouldForwardTapAction;
 - (BOOL)handleStatusBarTapAction:(UIAction *)action;
++ (UIInterfaceOrientationMask)supportedInterfaceOrientationsForWindow:(UIWindow *)window;
+- (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations forController:(DecoratedAppSceneViewController *)controller;
+- (void)releaseOrientationForController:(DecoratedAppSceneViewController *)controller;
 @end

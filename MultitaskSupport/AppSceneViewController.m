@@ -13,6 +13,82 @@
 #import "LCSharedUtils.h"
 #import "utils.h"
 #import "UIKitPrivate+MultitaskSupport.h"
+#import "../LiveContainer/LCOrientationBridge.h"
+
+API_AVAILABLE(ios(16.0))
+@interface LCOrientationRequestReceiver : NSObject <NSXPCListenerDelegate, LCOrientationHost>
+@property(nonatomic, weak) AppSceneViewController *sceneViewController;
+@property(nonatomic, strong) NSXPCListener *listener;
+@property(nonatomic, strong) NSXPCConnection *connection;
+@property(nonatomic) BOOL invalidated;
+- (void)invalidate;
+@end
+
+@implementation LCOrientationRequestReceiver
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _listener = [NSXPCListener anonymousListener];
+        _listener.delegate = self;
+        [_listener resume];
+    }
+    return self;
+}
+
+- (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection {
+    @synchronized (self) {
+        if (self.invalidated || self.connection) return NO;
+        self.connection = connection;
+    }
+    connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(LCOrientationHost)];
+    connection.exportedObject = self;
+    __weak typeof(self) weakSelf = self;
+    __weak NSXPCConnection *weakConnection = connection;
+    connection.interruptionHandler = ^{ [weakConnection invalidate]; };
+    connection.invalidationHandler = ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            LCOrientationRequestReceiver *receiver = weakSelf;
+            if (!receiver) return;
+            @synchronized (receiver) {
+                if (receiver.connection != weakConnection) return;
+                receiver.connection = nil;
+            }
+            AppSceneViewController *vc = receiver.sceneViewController;
+            if ([vc.delegate respondsToSelector:@selector(appSceneVCOrientationConnectionDidInvalidate:)]) {
+                [vc.delegate appSceneVCOrientationConnectionDidInvalidate:vc];
+            }
+        });
+    };
+    [connection resume];
+    return YES;
+}
+
+- (void)requestInterfaceOrientations:(NSUInteger)orientations {
+    NSXPCConnection *originConnection = NSXPCConnection.currentConnection;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LCOrientationRequestReceiver *receiver = weakSelf;
+        if (!receiver) return;
+        @synchronized (receiver) {
+            if (receiver.invalidated || receiver.connection != originConnection) return;
+        }
+        AppSceneViewController *vc = receiver.sceneViewController;
+        if ([vc.delegate respondsToSelector:@selector(appSceneVC:didRequestInterfaceOrientations:)]) {
+            [vc.delegate appSceneVC:vc didRequestInterfaceOrientations:orientations];
+        }
+    });
+}
+
+- (void)invalidate {
+    @synchronized (self) {
+        self.invalidated = YES;
+        [self.connection invalidate];
+        self.connection = nil;
+        [self.listener invalidate];
+        self.listener = nil;
+    }
+}
+@end
 
 @interface AppSceneViewController()
 @property int resizeDebounceToken;
@@ -20,6 +96,7 @@
 @property CGPoint normalizedOrigin;
 @property bool isNativeWindow;
 @property NSUUID* identifier;
+@property(nonatomic, strong) LCOrientationRequestReceiver *orientationReceiver;
 @end
 
 @interface AppSceneViewController()
@@ -76,6 +153,13 @@ static __weak AppSceneViewController *cellularSideStoreScene;
         @"bookmarks": bookmarks,
         @"lcHomePath": NSHomeDirectory(),
     }.mutableCopy;
+
+    // Each virtual guest gets its own endpoint; native windows keep UIKit's path.
+    if (!self.isNativeWindow) {
+        self.orientationReceiver = [LCOrientationRequestReceiver new];
+        self.orientationReceiver.sceneViewController = self;
+        userInfo[LCOrientationEndpointKey] = self.orientationReceiver.listener.endpoint;
+    }
     
     NSString* launchAppUrlScheme = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
     [NSUserDefaults.lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
@@ -359,6 +443,8 @@ static __weak AppSceneViewController *cellularSideStoreScene;
     }
     _isAppTerminationCleanUpCalled = true;
     dispatch_async(dispatch_get_main_queue(), ^{
+        [self.orientationReceiver invalidate];
+        self.orientationReceiver = nil;
         if(self.sceneID) {
             [[PrivClass(FBSceneManager) sharedInstance] destroyScene:self.sceneID withTransitionContext:nil];
         }
@@ -432,6 +518,10 @@ static __weak AppSceneViewController *cellularSideStoreScene;
 
 - (BOOL)usesHostingControllerAPI {
     return _hostingController != nil;
+}
+
+- (void)dealloc {
+    [_orientationReceiver invalidate];
 }
 
 @end

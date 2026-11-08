@@ -47,6 +47,13 @@ import Intents
             return nil
         }
     }
+
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        if #available(iOS 16.0, *), let window {
+            return VirtualWindowsHostView.supportedInterfaceOrientations(for: window)
+        }
+        return UIDevice.current.userInterfaceIdiom == .pad ? .all : .allButUpsideDown
+    }
 }
 
 class SceneDelegate: NSObject, UIWindowSceneDelegate, ObservableObject { // Make SceneDelegate conform ObservableObject

@@ -4,14 +4,99 @@
 #import "../LiveContainer/utils.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 #import "Localization.h"
+#import "../LiveContainer/LCOrientationBridge.h"
 
 UIInterfaceOrientation LCOrientationLock = UIInterfaceOrientationUnknown;
 NSMutableArray<NSString*>* LCSupportedUrlSchemes = nil;
 BOOL launchURLProcessed = NO;
 
+@interface NSObject (LCGuestOrientationLaunchInfo)
++ (NSDictionary *)retrievedAppInfo;
+@end
+
+@interface UIWindowScene (LCGuestOrientationBridge)
+- (void)lc_requestGeometryUpdateWithPreferences:(UIWindowSceneGeometryPreferences *)preferences
+                                  errorHandler:(void (^)(NSError *error))errorHandler API_AVAILABLE(ios(16.0));
+@end
+
+static NSXPCListenerEndpoint *LCGuestOrientationEndpoint;
+static NSXPCConnection *LCGuestOrientationConnection;
+
+// Connection state is confined to the main queue. Failed requests are never
+// replayed: a later explicit request can establish a new connection instead.
+static void LCDiscardGuestOrientationConnection(NSXPCConnection *connection) {
+    if (!connection || LCGuestOrientationConnection != connection) return;
+    LCGuestOrientationConnection = nil;
+    [connection invalidate];
+}
+
+static NSXPCConnection *LCGetGuestOrientationConnection(void) {
+    if (LCGuestOrientationConnection) return LCGuestOrientationConnection;
+    NSXPCConnection *connection = [[NSXPCConnection alloc] initWithListenerEndpoint:LCGuestOrientationEndpoint];
+    connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(LCOrientationHost)];
+    __weak NSXPCConnection *weakConnection = connection;
+    void (^connectionEnded)(void) = ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            LCDiscardGuestOrientationConnection(weakConnection);
+        });
+    };
+    connection.interruptionHandler = connectionEnded;
+    connection.invalidationHandler = connectionEnded;
+    LCGuestOrientationConnection = connection;
+    [connection resume];
+    return connection;
+}
+
+static BOOL LCIsMainOrientationScene(UIWindowScene *scene) {
+    if (scene.activationState != UISceneActivationStateForegroundActive || scene.screen != UIScreen.mainScreen) return NO;
+    UIWindow *keyWindow = UIApplication.sharedApplication.keyWindow;
+    return keyWindow.windowScene == scene && !keyWindow.hidden && keyWindow.alpha > 0 && keyWindow.rootViewController;
+}
+
+static void LCForwardGuestOrientationRequest(UIWindowScene *scene, UIInterfaceOrientationMask orientations) {
+    __weak UIWindowScene *weakScene = scene;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!weakScene || !LCIsMainOrientationScene(weakScene)) return;
+        NSXPCConnection *connection = LCGetGuestOrientationConnection();
+        __weak NSXPCConnection *weakConnection = connection;
+        id<LCOrientationHost> host = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+            NSLog(@"[LCOrientation] Host request failed: %@", error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                LCDiscardGuestOrientationConnection(weakConnection);
+            });
+        }];
+        [host requestInterfaceOrientations:orientations];
+    });
+}
+
+static void LCInitGuestOrientationBridge(void) {
+    if (!NSUserDefaults.isLiveProcess) return;
+    if (@available(iOS 16.0, *)) {
+        Class handler = NSClassFromString(@"LiveProcessHandler");
+        if (![handler respondsToSelector:@selector(retrievedAppInfo)]) return;
+        id endpoint = [handler retrievedAppInfo][LCOrientationEndpointKey];
+        if (![endpoint isKindOfClass:NSXPCListenerEndpoint.class]) return;
+        LCGuestOrientationEndpoint = endpoint;
+        swizzle(UIWindowScene.class, @selector(requestGeometryUpdateWithPreferences:errorHandler:), @selector(lc_requestGeometryUpdateWithPreferences:errorHandler:));
+    }
+}
+
+@implementation UIWindowScene (LCGuestOrientationBridge)
+- (void)lc_requestGeometryUpdateWithPreferences:(UIWindowSceneGeometryPreferences *)preferences
+                                  errorHandler:(void (^)(NSError *error))errorHandler {
+    // Preserve the guest's UIKit request and its original failure callback.
+    [self lc_requestGeometryUpdateWithPreferences:preferences errorHandler:errorHandler];
+    if (![preferences isKindOfClass:UIWindowSceneGeometryPreferencesIOS.class]) return;
+    UIInterfaceOrientationMask orientations = ((UIWindowSceneGeometryPreferencesIOS *)preferences).interfaceOrientations;
+    if (!orientations || (orientations & ~UIInterfaceOrientationMaskAll)) return;
+    LCForwardGuestOrientationRequest(self, orientations);
+}
+@end
+
 __attribute__((constructor))
 static void UIKitGuestHooksInit() {
     if(!NSUserDefaults.lcGuestAppId) return;
+    LCInitGuestOrientationBridge();
     swizzle(UIApplication.class, @selector(_applicationOpenURLAction:payload:origin:), @selector(hook__applicationOpenURLAction:payload:origin:));
     swizzle(UIApplication.class, @selector(_connectUISceneFromFBSScene:transitionContext:), @selector(hook__connectUISceneFromFBSScene:transitionContext:));
     swizzle(UIApplication.class, @selector(openURL:options:completionHandler:), @selector(hook_openURL:options:completionHandler:));

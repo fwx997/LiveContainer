@@ -251,6 +251,7 @@ static const CGFloat LCWindowTopBarExtension = 12;
 }
 
 - (void)closeWindow {
+    [self releaseHostOrientation];
     _isAppTerminationRequested = true;
     if([_appSceneVC isAppRunning]) {
         [_appSceneVC terminate];
@@ -260,6 +261,7 @@ static const CGFloat LCWindowTopBarExtension = 12;
 }
 
 - (void)minimizeWindow {
+    [self releaseHostOrientation];
     if (self.view.hidden) return;
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.alpha = 0;
@@ -273,6 +275,7 @@ static const CGFloat LCWindowTopBarExtension = 12;
 }
 
 - (void)minimizeWindowPiP {
+    [self releaseHostOrientation];
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.alpha = 0;
     } completion:^(BOOL finished) {
@@ -292,6 +295,7 @@ static const CGFloat LCWindowTopBarExtension = 12;
     
     [self.view layoutIfNeeded];
     if (self.isMaximized) {
+        [self releaseHostOrientation];
         updateSettingsBlock = ^(UIMutableApplicationSceneSettings *settings) {
             [self updateWindowedFrameWithSettings:settings];
         };
@@ -336,6 +340,7 @@ static const CGFloat LCWindowTopBarExtension = 12;
 }
 
 - (void)appSceneVCAppDidExit:(AppSceneViewController*)vc {
+    [self releaseHostOrientation];
     self.hasAppTerminated = YES;
     BOOL skipTerminationScreen = [NSUserDefaults.lcSharedDefaults boolForKey:@"LCSkipTerminatedScreen"];
     BOOL isManual = _isAppTerminationRequested;
@@ -390,6 +395,21 @@ static const CGFloat LCWindowTopBarExtension = 12;
 - (void)appSceneVCWillActivateScene:(AppSceneViewController *)vc {
     // Set up initial settings such as frame, safe area, etc
     [self appSceneVC:vc didUpdateFromSettings:vc.presenter.scene.settings.mutableCopy transitionContext:nil lifecycleActionType:0];
+}
+
+- (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations {
+    if (vc != self.appSceneVC || ![self.view.superview isKindOfClass:VirtualWindowsHostView.class]) return;
+    [(VirtualWindowsHostView *)self.view.superview requestInterfaceOrientations:orientations forController:self];
+}
+
+- (void)appSceneVCOrientationConnectionDidInvalidate:(AppSceneViewController *)vc {
+    if (vc == self.appSceneVC) [self releaseHostOrientation];
+}
+
+- (void)releaseHostOrientation {
+    if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview releaseOrientationForController:self];
+    }
 }
 
 - (void)appSceneVC:(AppSceneViewController*)vc didUpdateFromSettings:(UIMutableApplicationSceneSettings *)baseSettings transitionContext:(id)newContext lifecycleActionType:(uint32_t)actionType {

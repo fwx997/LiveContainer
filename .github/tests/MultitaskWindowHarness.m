@@ -146,8 +146,12 @@ enum { UIUserInterfaceIdiomPad = 1 };
 @end
 
 @interface VirtualWindowsHostView : UIView
+- (void)validateOrientationOwner;
+- (void)restoreHostOrientationIfNeeded;
 @end
 @implementation VirtualWindowsHostView
+- (void)validateOrientationOwner {}
+- (void)restoreHostOrientationIfNeeded {}
 // INSERT_HOST_LAYOUT
 // INSERT_HOST_ACTIVATION
 // INSERT_SAFE_AREA_CHANGE
