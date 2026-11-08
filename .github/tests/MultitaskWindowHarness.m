@@ -1,9 +1,12 @@
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+// INSERT_WINDOW_BAR_METRICS
+
 // Minimal host views let the production layout run after a guest stops invoking
 // scene update blocks, without launching an extension or a private UIKit scene.
 typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
+static const UIEdgeInsets UIEdgeInsetsZero = {0, 0, 0, 0};
 static CGRect UIEdgeInsetsInsetRect(CGRect rect, UIEdgeInsets insets) {
     return CGRectMake(rect.origin.x + insets.left, rect.origin.y + insets.top,
                       rect.size.width - insets.left - insets.right,
@@ -61,6 +64,7 @@ enum { UIUserInterfaceIdiomPad = 1 };
 @class UIWindow;
 @interface UIView : NSObject
 @property CGRect frame, bounds;
+@property CGPoint center;
 @property CGAffineTransform transform;
 @property UIEdgeInsets safeAreaInsets;
 @property UIWindow *window;
@@ -101,6 +105,7 @@ enum { UIUserInterfaceIdiomPad = 1 };
 @end
 
 @interface UIMutableApplicationSceneSettings : NSObject
+@property UIEdgeInsets peripheryInsets, safeAreaInsetsPortrait;
 @end
 @implementation UIMutableApplicationSceneSettings
 @end
@@ -124,13 +129,18 @@ enum { UIUserInterfaceIdiomPad = 1 };
 @end
 
 @interface DecoratedAppSceneViewController : NSObject
-@property UIView *view, *navigationBar;
+@property UIView *view, *navigationBar, *windowBarView;
+@property NSLayoutConstraint *navigationBarTopConstraint;
 @property AppSceneViewController *appSceneVC;
 @property BOOL isMaximized, hasAppTerminated;
+@property CGRect originalFrame;
 @property NSArray<NSLayoutConstraint *> *activatedVerticalConstraints;
 @end
 @implementation DecoratedAppSceneViewController
+// INSERT_WINDOW_BAR_HEIGHT
+// INSERT_INITIAL_WINDOW_FRAME
 // INSERT_MAXIMIZED_FRAME
+// INSERT_WINDOWED_FRAME
 // INSERT_VERTICAL_CONSTRAINTS
 - (void)updateMaximizedFrameWithSettings:(UIMutableApplicationSceneSettings *)settings { [self updateMaximizedFrame]; }
 @end
@@ -165,6 +175,8 @@ int main(void) {
         vc.view.superview = host;
         vc.view.controller = vc;
         vc.navigationBar = [UIView new];
+        vc.windowBarView = [UIView new];
+        vc.navigationBarTopConstraint = [NSLayoutConstraint new];
         vc.appSceneVC = [AppSceneViewController new];
         vc.appSceneVC.view = [UIView new];
         vc.isMaximized = YES;
@@ -172,18 +184,22 @@ int main(void) {
 
         MultitaskDockManager.shared.isCollapsed = YES;
         [vc updateVerticalConstraints];
-        require(vc.navigationBar.hidden, @"A running maximized app should still hide its bar with the dock");
+        require(vc.navigationBar.hidden && vc.windowBarView.hidden, @"A collapsed dock must hide the complete window header");
         require(CGRectEqualToRect(vc.view.frame, CGRectMake(0, -24, 1024, 768)), @"Running fullscreen geometry changed");
 
         vc.hasAppTerminated = YES;
         [vc updateVerticalConstraints];
         require(!vc.navigationBar.hidden && vc.navigationBar.alpha == 1, @"Terminated app lost its close controls");
-        require(vc.activatedVerticalConstraints.lastObject.constant == 44, @"Terminated controls lost their tap height");
-        require(CGRectEqualToRect(vc.view.frame, CGRectMake(0, 0, 1024, 724)), @"Terminated controls overlap the status bar or home indicator");
+        require(!vc.windowBarView.hidden && vc.windowBarView.alpha == 1, @"Terminated app lost its opaque header");
+        require(vc.activatedVerticalConstraints.lastObject.constant == 56, @"Top header must cover an additional 12pt");
+        require(vc.navigationBarTopConstraint.constant == 6, @"Top controls must retain 6pt below them");
+        require(CGRectEqualToRect(vc.view.frame, CGRectMake(0, -12, 1024, 736)), @"Header must extend upward while preserving the bottom edge");
+        require(vc.view.frame.origin.y + [vc windowBarHeight] == 44, @"Header extension moved the guest content down");
 
         [NSUserDefaults.lcSharedDefaults setBool:YES forKey:@"LCMultitaskBottomWindowBar"];
         [vc updateVerticalConstraints];
         require(!vc.navigationBar.hidden && CGRectGetMaxY(vc.view.frame) == 724, @"Bottom controls overlap the home indicator");
+        require([vc windowBarHeight] == 44 && vc.navigationBarTopConstraint.constant == 0, @"Bottom bar dimensions changed");
 
         window.bounds = CGRectMake(0, 0, 768, 1024);
         window.safeAreaInsets = (UIEdgeInsets){28, 8, 20, 8};
@@ -197,6 +213,47 @@ int main(void) {
         require(!host.needsLayout, @"Another window scene changed this host");
         [host safeAreaInsetsDidChange];
         require(host.needsLayout, @"Safe area changes must request a new host layout");
+
+        [NSUserDefaults.lcSharedDefaults setBool:NO forKey:@"LCMultitaskBottomWindowBar"];
+        UIDevice.currentDevice.userInterfaceIdiom = 0;
+        window.bounds = window.frame = CGRectMake(0, 0, 390, 844);
+        window.safeAreaInsets = (UIEdgeInsets){59, 0, 34, 0};
+        host.frame = CGRectMake(0, 59, 390, 785);
+        vc.hasAppTerminated = NO;
+        MultitaskDockManager.shared.isCollapsed = NO;
+        [vc updateVerticalConstraints];
+        require(CGRectEqualToRect(vc.view.frame, CGRectMake(0, -12, 390, 797)), @"Phone header did not cover the exposed top edge");
+        require(host.frame.origin.y + vc.view.frame.origin.y + [vc windowBarHeight] == 103, @"Phone guest content moved below its previous top edge");
+        require(vc.view.frame.origin.y + vc.navigationBarTopConstraint.constant == -6, @"Phone title and controls did not move up 6pt");
+
+        window.bounds = window.frame = CGRectMake(0, 0, 844, 390);
+        window.safeAreaInsets = (UIEdgeInsets){0, 59, 21, 59};
+        window.windowScene.interfaceOrientation = 3;
+        host.frame = window.bounds;
+        [host layoutSubviews];
+        require(CGRectEqualToRect(vc.view.frame, window.bounds), @"Header must not extend beyond a landscape screen");
+
+        window.bounds = window.frame = CGRectMake(0, 0, 390, 844);
+        window.safeAreaInsets = (UIEdgeInsets){59, 0, 34, 0};
+        window.windowScene.interfaceOrientation = 0;
+        host.frame = window.bounds;
+        host.bounds = window.bounds;
+        vc.isMaximized = NO;
+        CGRect floatingFrame = [vc initialWindowFrame];
+        require(CGRectEqualToRect(floatingFrame, CGRectMake(35, 148, 320, 536)), @"A new floating window must grow upward by 12pt");
+        require(floatingFrame.origin.y + [vc windowBarHeight] == 204, @"A new floating window moved the original guest content edge");
+        require(CGRectGetMaxY(floatingFrame) == 684, @"A new floating window moved the original bottom edge");
+        vc.originalFrame = CGRectMake(0, 0, 320, 536);
+        vc.view.center = CGPointMake(195, 250);
+        [vc updateWindowedFrameWithSettings:[UIMutableApplicationSceneSettings new]];
+        require(CGRectEqualToRect(vc.view.frame, CGRectMake(35, 47, 320, 536)), @"A floating top header must be allowed to cover the same 12pt edge");
+        [vc updateVerticalConstraints];
+        require([vc windowBarHeight] == 56 && vc.navigationBarTopConstraint.constant == 6, @"Floating windows lost the padded header");
+        [NSUserDefaults.lcSharedDefaults setBool:YES forKey:@"LCMultitaskBottomWindowBar"];
+        [vc updateWindowedFrameWithSettings:[UIMutableApplicationSceneSettings new]];
+        [vc updateVerticalConstraints];
+        require(vc.view.frame.origin.y == 59 && [vc windowBarHeight] == 44, @"Floating bottom bars changed their safe area or height");
+        require(CGRectEqualToRect([vc initialWindowFrame], CGRectMake(35, 160, 320, 524)), @"A new floating bottom bar must keep the original centered frame");
 
         CGRect restoredFrame = CGRectMake(30, 40, 320, 524);
         vc.isMaximized = NO;
@@ -212,7 +269,7 @@ int main(void) {
         [host layoutSubviews];
         require(CGRectEqualToRect(vc.view.frame, restoredFrame), @"Detached window geometry was destroyed");
         [NSUserDefaults.lcSharedDefaults removeObjectForKey:@"LCMultitaskBottomWindowBar"];
-        puts("Terminated guest window controls and host geometry regression passed");
+        puts("Guest window header coverage, spacing, and host geometry regressions passed");
     }
     return 0;
 }

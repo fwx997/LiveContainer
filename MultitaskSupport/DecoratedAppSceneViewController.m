@@ -8,6 +8,9 @@
 #import "../LiveContainer/Localization.h"
 #import "utils.h"
 
+static const CGFloat LCWindowControlBarHeight = 44;
+static const CGFloat LCWindowTopBarExtension = 12;
+
 @interface DecoratedAppSceneViewController()
 @property(nonatomic) NSArray* activatedVerticalConstraints;
 @property(nonatomic) NSString* dataUUID;
@@ -16,6 +19,8 @@
 @property(nonatomic) UIBarButtonItem *maximizeButton;
 @property(nonatomic) bool isAppTerminationRequested;
 @property(nonatomic) BOOL hasAppTerminated;
+@property(nonatomic) UIView *windowBarView;
+@property(nonatomic) NSLayoutConstraint *navigationBarTopConstraint;
 @end
 
 @implementation DecoratedAppSceneViewController
@@ -96,11 +101,8 @@
 }
 
 - (void)setupDecoratedView {
-    CGFloat navBarHeight = 44;
-    BOOL isLandscape = UIInterfaceOrientationIsLandscape(UIApp.statusBarOrientation);
-    CGRect frame = CGRectMake(0, 0, isLandscape ? 480 : 320, (isLandscape ? 320 : 480) + navBarHeight);
-    CGPoint rootViewCenter = self.view.superview.center;
-    frame.origin = CGPointMake(rootViewCenter.x - frame.size.width / 2, rootViewCenter.y - frame.size.height / 2);
+    CGFloat navBarHeight = [self windowBarHeight];
+    CGRect frame = [self initialWindowFrame];
     
     if(_isMaximized) {
         CGRect maxFrame = UIEdgeInsetsInsetRect(self.view.window.frame, self.view.window.safeAreaInsets);
@@ -113,8 +115,18 @@
     }
     
     // Navigation bar
-    UINavigationBar *navigationBar = [[UINavigationBar alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, navBarHeight)];
-    navigationBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    self.windowBarView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, navBarHeight)];
+    self.windowBarView.backgroundColor = UIColor.systemBackgroundColor;
+    UINavigationBar *navigationBar = [[UINavigationBar alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, LCWindowControlBarHeight)];
+    navigationBar.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.windowBarView addSubview:navigationBar];
+    self.navigationBarTopConstraint = [navigationBar.topAnchor constraintEqualToAnchor:self.windowBarView.topAnchor];
+    [NSLayoutConstraint activateConstraints:@[
+        self.navigationBarTopConstraint,
+        [navigationBar.leadingAnchor constraintEqualToAnchor:self.windowBarView.leadingAnchor],
+        [navigationBar.trailingAnchor constraintEqualToAnchor:self.windowBarView.trailingAnchor],
+        [navigationBar.heightAnchor constraintEqualToConstant:LCWindowControlBarHeight]
+    ]];
     UINavigationItem *navigationItem = [[UINavigationItem alloc] initWithTitle:self.title];
     navigationBar.items = @[navigationItem];
     
@@ -125,9 +137,7 @@
 
     self.navigationBar = navigationBar;
     self.navigationItem = navigationBar.items.firstObject;
-    if (!self.navigationBar.superview) {
-        [self.view addArrangedSubview:self.navigationBar];
-    }
+    [self.view addArrangedSubview:self.windowBarView];
     
     CGRect contentFrame = CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height - navBarHeight);
     UIView *fixedPositionContentView = [[UIView alloc] initWithFrame:contentFrame];
@@ -147,13 +157,13 @@
     UIPanGestureRecognizer *moveGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(moveWindow:)];
     moveGesture.minimumNumberOfTouches = 1;
     moveGesture.maximumNumberOfTouches = 1;
-    [self.navigationBar addGestureRecognizer:moveGesture];
+    [self.windowBarView addGestureRecognizer:moveGesture];
 
     // Resize handle (idea stolen from Notes debugging window)
     UIPanGestureRecognizer *resizeGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(resizeWindow:)];
     resizeGesture.minimumNumberOfTouches = 1;
     resizeGesture.maximumNumberOfTouches = 1;
-    self.resizeHandle = [[ResizeHandleView alloc] initWithFrame:CGRectMake(self.view.frame.size.width - navBarHeight, self.view.frame.size.height - navBarHeight, navBarHeight, navBarHeight)];
+    self.resizeHandle = [[ResizeHandleView alloc] initWithFrame:CGRectMake(self.view.frame.size.width - LCWindowControlBarHeight, self.view.frame.size.height - LCWindowControlBarHeight, LCWindowControlBarHeight, LCWindowControlBarHeight)];
     self.resizeHandle.alpha = _isMaximized ? 0.0 : 1.0;
     [self.resizeHandle addGestureRecognizer:resizeGesture];
     [self.view addSubview:self.resizeHandle];
@@ -394,7 +404,7 @@
         } else {
             [self updateWindowedFrameWithSettings:settings];
         }
-        CGRect newFrame = CGRectMake(0, 0, self.view.bounds.size.width, self.view.bounds.size.height - self.navigationBar.frame.size.height/self.scaleRatio);
+        CGRect newFrame = CGRectMake(0, 0, self.view.bounds.size.width, self.view.bounds.size.height - self.windowBarView.frame.size.height/self.scaleRatio);
         
         if(UIInterfaceOrientationIsLandscape(baseSettings.interfaceOrientation)) {
             settings.frame = CGRectMake(0, 0, newFrame.size.height, newFrame.size.width);
@@ -444,11 +454,11 @@
         if(bottomWindowBar) {
             self.navigationItem.leftBarButtonItems = self.navigationItem.rightBarButtonItems;
             self.navigationItem.rightBarButtonItems = nil;
-            [self.view addArrangedSubview:self.navigationBar];
+            [self.view addArrangedSubview:self.windowBarView];
         } else {
             self.navigationItem.rightBarButtonItems = self.navigationItem.leftBarButtonItems;
             self.navigationItem.leftBarButtonItems = nil;
-            [self.view insertArrangedSubview:self.navigationBar atIndex:0];
+            [self.view insertArrangedSubview:self.windowBarView atIndex:0];
         }
         
         [self updateVerticalConstraints];
@@ -492,14 +502,34 @@
     [self.view.superview bringSubviewToFront:self.view];
 }
 
+- (CGFloat)windowBarHeight {
+    BOOL bottomWindowBar = [NSUserDefaults.lcSharedDefaults boolForKey:@"LCMultitaskBottomWindowBar"];
+    return LCWindowControlBarHeight + (bottomWindowBar ? 0 : LCWindowTopBarExtension);
+}
+
+- (CGRect)initialWindowFrame {
+    BOOL isLandscape = UIInterfaceOrientationIsLandscape(self.view.window.windowScene.interfaceOrientation);
+    CGRect hostBounds = self.view.superview.bounds;
+    CGFloat width = isLandscape ? 480 : 320;
+    CGFloat height = (isLandscape ? 320 : 480) + LCWindowControlBarHeight;
+    CGFloat extension = [self windowBarHeight] - LCWindowControlBarHeight;
+    // Grow floating windows upward, preserving the original content and bottom.
+    return CGRectMake(CGRectGetMidX(hostBounds) - width / 2,
+                      CGRectGetMidY(hostBounds) - height / 2 - extension,
+                      width, height + extension);
+}
+
 - (void)updateVerticalConstraints {
     [self.view layoutIfNeeded];
     [UIView animateWithDuration:0.3 animations:^{
         BOOL bottomWindowBar = [NSUserDefaults.lcSharedDefaults boolForKey:@"LCMultitaskBottomWindowBar"];
         BOOL hideWindowBar = MultitaskDockManager.shared.isCollapsed && self.isMaximized && !self.hasAppTerminated;
-        CGFloat navBarHeight = hideWindowBar ? 0 : 44;
+        CGFloat navBarHeight = hideWindowBar ? 0 : [self windowBarHeight];
+        self.windowBarView.alpha = hideWindowBar ? 0 : 1;
+        self.windowBarView.hidden = hideWindowBar;
         self.navigationBar.alpha = hideWindowBar ? 0 : 1;
         self.navigationBar.hidden = hideWindowBar;
+        self.navigationBarTopConstraint.constant = bottomWindowBar ? 0 : LCWindowTopBarExtension / 2;
         
         // Update safe area insets
         if(self.isMaximized) {
@@ -516,13 +546,13 @@
             self.activatedVerticalConstraints = @[
                 [self.appSceneVC.view.topAnchor constraintEqualToAnchor:self.view.topAnchor],
                 [self.appSceneVC.view.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-navBarHeight],
-                [self.navigationBar.heightAnchor constraintEqualToConstant:navBarHeight]
+                [self.windowBarView.heightAnchor constraintEqualToConstant:navBarHeight]
             ];
         } else {
             self.activatedVerticalConstraints = @[
                 [self.appSceneVC.view.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:navBarHeight],
                 [self.appSceneVC.view.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-                [self.navigationBar.heightAnchor constraintEqualToConstant:navBarHeight]
+                [self.windowBarView.heightAnchor constraintEqualToConstant:navBarHeight]
             ];
         }
         [NSLayoutConstraint activateConstraints:self.activatedVerticalConstraints];
@@ -584,6 +614,11 @@
             insets.top = 0;
         }
     }
+    if (!self.navigationBar.hidden && ![NSUserDefaults.lcSharedDefaults boolForKey:@"LCMultitaskBottomWindowBar"]) {
+        // Extend the opaque header upward while keeping the guest content's
+        // portrait top edge fixed. Controls rise 6pt and gain 6pt below them.
+        insets.top = MAX(0, insets.top - LCWindowTopBarExtension);
+    }
     // Window bounds must be converted to the hosting view's coordinate space.
     CGRect frame = [hostView convertRect:UIEdgeInsetsInsetRect(window.bounds, insets) fromView:window];
     if (!CGRectEqualToRect(self.view.frame, frame)) {
@@ -601,10 +636,12 @@
     CGPoint center = self.view.center;
     CGRect frame = CGRectZero;
     frame.size.width = MIN(newFrame.size.width, maxFrame.size.width);
-    frame.size.height = MIN(newFrame.size.height, maxFrame.size.height);
+    BOOL bottomWindowBar = [NSUserDefaults.lcSharedDefaults boolForKey:@"LCMultitaskBottomWindowBar"];
+    CGFloat minimumY = bottomWindowBar ? maxFrame.origin.y : MAX(0, maxFrame.origin.y - LCWindowTopBarExtension);
+    frame.size.height = MIN(newFrame.size.height, CGRectGetMaxY(maxFrame) - minimumY);
     CGFloat oobOffset = MAX(30, frame.size.width - 30);
     frame.origin.x = MAX(maxFrame.origin.x - oobOffset, MIN(CGRectGetMaxX(maxFrame) - frame.size.width + oobOffset, center.x - frame.size.width / 2));
-    frame.origin.y = MAX(maxFrame.origin.y, MIN(center.y - frame.size.height / 2, CGRectGetMaxY(maxFrame) - frame.size.height));
+    frame.origin.y = MAX(minimumY, MIN(center.y - frame.size.height / 2, CGRectGetMaxY(maxFrame) - frame.size.height));
     [UIView animateWithDuration:0.3 animations:^{
         self.view.frame = frame;
     }];

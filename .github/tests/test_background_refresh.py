@@ -52,8 +52,13 @@ class BackgroundRefreshTests(unittest.TestCase):
         decorated = (ROOT / "MultitaskSupport/DecoratedAppSceneViewController.m").read_text(encoding="utf-8")
         host = (ROOT / "MultitaskSupport/VirtualWindowsHostView.m").read_text(encoding="utf-8")
         harness = Path(__file__).with_name("MultitaskWindowHarness.m").read_text(encoding="utf-8")
+        metrics = re.findall(r"^static const CGFloat LCWindow\w+ = [^;]+;", decorated, flags=re.MULTILINE)
+        harness = harness.replace("// INSERT_WINDOW_BAR_METRICS", "\n".join(metrics))
         methods = {
+            "INSERT_WINDOW_BAR_HEIGHT": production_method(decorated, "- (CGFloat)windowBarHeight {"),
+            "INSERT_INITIAL_WINDOW_FRAME": production_method(decorated, "- (CGRect)initialWindowFrame {"),
             "INSERT_MAXIMIZED_FRAME": production_method(decorated, "- (void)updateMaximizedFrame {"),
+            "INSERT_WINDOWED_FRAME": production_method(decorated, "- (void)updateWindowedFrameWithSettings:"),
             "INSERT_VERTICAL_CONSTRAINTS": production_method(decorated, "- (void)updateVerticalConstraints {"),
             "INSERT_HOST_LAYOUT": production_method(host, "- (void)layoutSubviews {"),
             "INSERT_HOST_ACTIVATION": production_method(host, "- (void)hostSceneDidActivate:"),
