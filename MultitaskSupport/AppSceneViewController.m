@@ -21,6 +21,8 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic, strong) NSXPCListener *listener;
 @property(nonatomic, strong) NSXPCConnection *connection;
 @property(nonatomic) BOOL invalidated;
+@property(nonatomic) BOOL observingPlayback, pictureInPictureActive, hostActive;
+- (void)publishPlaybackState;
 - (void)invalidate;
 @end
 
@@ -31,6 +33,11 @@ API_AVAILABLE(ios(16.0))
         _listener = [NSXPCListener anonymousListener];
         _listener.delegate = self;
         [_listener resume];
+        _hostActive = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        [center addObserver:self selector:@selector(hostActivityChanged:) name:UIApplicationDidBecomeActiveNotification object:nil];
+        [center addObserver:self selector:@selector(hostActivityChanged:) name:UIApplicationWillResignActiveNotification object:nil];
+        [center addObserver:self selector:@selector(hostActivityChanged:) name:UIApplicationDidEnterBackgroundNotification object:nil];
     }
     return self;
 }
@@ -42,6 +49,7 @@ API_AVAILABLE(ios(16.0))
     }
     connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(LCOrientationHost)];
     connection.exportedObject = self;
+    connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(LCContainerPlaybackGuest)];
     __weak typeof(self) weakSelf = self;
     __weak NSXPCConnection *weakConnection = connection;
     connection.interruptionHandler = ^{ [weakConnection invalidate]; };
@@ -52,6 +60,7 @@ API_AVAILABLE(ios(16.0))
             @synchronized (receiver) {
                 if (receiver.connection != weakConnection) return;
                 receiver.connection = nil;
+                receiver.observingPlayback = NO;
             }
             AppSceneViewController *vc = receiver.sceneViewController;
             if ([vc.delegate respondsToSelector:@selector(appSceneVCOrientationConnectionDidInvalidate:)]) {
@@ -82,11 +91,40 @@ API_AVAILABLE(ios(16.0))
 - (void)invalidate {
     @synchronized (self) {
         self.invalidated = YES;
+        self.observingPlayback = NO;
+        [NSNotificationCenter.defaultCenter removeObserver:self];
         [self.connection invalidate];
         self.connection = nil;
         [self.listener invalidate];
         self.listener = nil;
     }
+}
+
+- (void)observeContainerPlaybackState {
+    NSXPCConnection *origin = NSXPCConnection.currentConnection;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.invalidated || self.connection != origin) return;
+        self.observingPlayback = YES;
+        [self publishPlaybackState];
+    });
+}
+
+- (void)hostActivityChanged:(NSNotification *)notification {
+    self.hostActive = [notification.name isEqualToString:UIApplicationDidBecomeActiveNotification];
+    [self publishPlaybackState];
+}
+
+- (void)publishPlaybackState {
+    if (self.invalidated || !self.observingPlayback || !self.connection) return;
+    NSDictionary *state = @{
+        @"version": @1, @"supported": @YES, @"connected": @YES,
+        @"active": @(self.pictureInPictureActive && self.sceneViewController.isAppRunning),
+        @"hostActive": @(self.hostActive),
+    };
+    id<LCContainerPlaybackGuest> guest = [self.connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+        NSLog(@"[LCPlayback] State delivery failed: %@", error.localizedDescription);
+    }];
+    [guest containerPlaybackStateDidChange:state];
 }
 @end
 
@@ -159,6 +197,7 @@ static __weak AppSceneViewController *cellularSideStoreScene;
         self.orientationReceiver = [LCOrientationRequestReceiver new];
         self.orientationReceiver.sceneViewController = self;
         userInfo[LCOrientationEndpointKey] = self.orientationReceiver.listener.endpoint;
+        userInfo[LCContainerPlaybackVersionKey] = @1;
     }
     
     NSString* launchAppUrlScheme = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
@@ -338,6 +377,7 @@ static __weak AppSceneViewController *cellularSideStoreScene;
 }
 
 - (void)terminate {
+    [self setContainerPictureInPictureActive:NO];
     if(self.isAppRunning) {
         [self.extension _kill:SIGTERM];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -485,6 +525,11 @@ static __weak AppSceneViewController *cellularSideStoreScene;
         [center removeObserver:self.extension name:UIApplicationDidEnterBackgroundNotification object:UIApp];
         [center removeObserver:self.extension name:UIApplicationWillResignActiveNotification object:UIApp];
     }
+}
+
+- (void)setContainerPictureInPictureActive:(BOOL)active {
+    self.orientationReceiver.pictureInPictureActive = active;
+    [self.orientationReceiver publishPlaybackState];
 }
 
 - (void)viewDidMoveToWindow:(UIWindow *)newWindow shouldAppearOrDisappear:(BOOL)appear {

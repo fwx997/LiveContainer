@@ -15,6 +15,8 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic, strong) AVPictureInPictureVideoCallViewController *pipVideoCallViewController;
 @property(nonatomic, strong) AVPictureInPictureController *pipController;
 @property(nonatomic) AppSceneViewController* displayingVC;
+@property(nonatomic) NSUInteger startGeneration;
+@property(nonatomic) BOOL observingBounds;
 @end
 
 
@@ -52,12 +54,14 @@ static PiPManager* sharedInstance = nil;
 }
 
 - (void)startPiPWithVC:(AppSceneViewController*)vc {
+    NSUInteger generation = ++self.startGeneration;
     [self.pipController stopPictureInPicture];
     if(self.displayingVC) {
         [self.displayingDecoratedVC unminimizeWindowPiP];
         [self pictureInPictureControllerDidStopPictureInPicture:self.pipController];
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([self.pipController isPictureInPictureActive] * 0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (generation != self.startGeneration || !vc.isAppRunning) return;
         self.displayingVC = vc;
         self.pipVideoCallViewController = [AVPictureInPictureVideoCallViewController new];
         self.pipVideoCallViewController.preferredContentSize = vc.view.bounds.size;
@@ -76,6 +80,7 @@ static PiPManager* sharedInstance = nil;
         self.pipController.delegate = self;
         [self.pipController setValue:@1 forKey:@"controlsStyle"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (generation != self.startGeneration || !vc.isAppRunning) return;
             [self.pipController startPictureInPicture];
         });
     });
@@ -83,11 +88,14 @@ static PiPManager* sharedInstance = nil;
 }
 
 - (void)stopPiP {
+    ++self.startGeneration;
     [self.pipController stopPictureInPicture];
 }
 
 // PIP delegate
 - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+    if (pictureInPictureController != self.pipController) return;
+    [self.displayingVC setContainerPictureInPictureActive:YES];
     [self.displayingDecoratedVC minimizeWindowPiP];
     if(self.displayingVC.usesHostingControllerAPI) {
         self.pipVideoCallContentView.frame = CGRectMake(0, 0, self.displayingVC.view.bounds.size.width, self.displayingVC.view.bounds.size.height);
@@ -101,6 +109,7 @@ static PiPManager* sharedInstance = nil;
                                 forKeyPath:@"bounds"
                                    options:NSKeyValueObservingOptionNew
                                    context:NULL];
+    self.observingBounds = YES;
     self.pipVideoCallViewController.preferredContentSize = self.displayingVC.view.bounds.size;
     [self.displayingVC setBackgroundNotificationEnabled:false];
     self.displayingVC.shouldIgnoreSceneUpdates = YES;
@@ -109,15 +118,21 @@ static PiPManager* sharedInstance = nil;
 
 
 - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
-    
+    if (pictureInPictureController != self.pipController) return;
+    [self.displayingVC setContainerPictureInPictureActive:YES];
 }
 
 - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+    if (pictureInPictureController != self.pipController) return;
     self.displayingVC.shouldIgnoreSceneUpdates = NO;
     [self.displayingDecoratedVC unminimizeWindowPiP];
 }
 
 - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+    if (pictureInPictureController != self.pipController) return;
+    [self.displayingVC setContainerPictureInPictureActive:NO];
+    self.displayingVC.shouldIgnoreSceneUpdates = NO;
+    [self stopObservingBounds];
     [self.displayingVC.view insertSubview:self.displayingVC.contentView atIndex:0];
     [self.displayingVC setBackgroundNotificationEnabled:true];
     // resize if needed (eg orientation differs)
@@ -132,7 +147,16 @@ static PiPManager* sharedInstance = nil;
 }
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStartPictureInPictureWithError:(NSError *)error {
+    if (pictureInPictureController != self.pipController) return;
+    [self.displayingDecoratedVC unminimizeWindowPiP];
+    [self pictureInPictureControllerDidStopPictureInPicture:pictureInPictureController];
     NSLog(@"%@", error.description);
+}
+
+- (void)stopObservingBounds {
+    if (!self.observingBounds) return;
+    [self.pipVideoCallViewController.view.layer removeObserver:self forKeyPath:@"bounds"];
+    self.observingBounds = NO;
 }
 
 - (void)observeValueForKeyPath:(NSString*)keyPath ofObject:(NSObject*)object change:(NSDictionary<NSString *,id> *) change context:(void *) context {

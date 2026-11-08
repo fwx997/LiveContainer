@@ -37,6 +37,7 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic) _UISceneHostingController *hostingController API_AVAILABLE(ios(17.0));
 - (instancetype)initWithBundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID delegate:(id<AppSceneViewControllerDelegate>)delegate;
 - (void)setBackgroundNotificationEnabled:(bool)enabled;
+- (void)setContainerPictureInPictureActive:(BOOL)active;
 - (void)updateFrameWithSettingsBlock:(void (^)(UIMutableApplicationSceneSettings *settings))block;
 - (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))block;
 - (void)appTerminationCleanUp;

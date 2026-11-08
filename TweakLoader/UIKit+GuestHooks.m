@@ -21,19 +21,53 @@ BOOL launchURLProcessed = NO;
 
 static NSXPCListenerEndpoint *LCGuestOrientationEndpoint;
 static NSXPCConnection *LCGuestOrientationConnection;
+static BOOL LCGuestPlaybackSupported;
+static NSDictionary *LCGuestPlaybackState;
+
+static NSDictionary *LCDisconnectedPlaybackState(void) {
+    return @{@"version": @1, @"supported": @(LCGuestPlaybackSupported),
+             @"connected": @NO, @"active": @NO, @"hostActive": @NO};
+}
+
+static void LCSetGuestPlaybackState(NSDictionary *state) {
+    LCGuestPlaybackState = [state copy];
+    [NSNotificationCenter.defaultCenter postNotificationName:LCContainerPlaybackStateDidChange object:nil userInfo:state];
+}
+
+@interface LCGuestPlaybackObserver : NSObject <LCContainerPlaybackGuest>
+@property(nonatomic, weak) NSXPCConnection *connection;
+@end
+
+@implementation LCGuestPlaybackObserver
+- (void)containerPlaybackStateDidChange:(NSDictionary *)state {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.connection != LCGuestOrientationConnection || !self.connection) return;
+        if (![state[@"version"] isEqual:@1]) return;
+        LCSetGuestPlaybackState(state);
+    });
+}
+@end
 
 // Connection state is confined to the main queue. Failed requests are never
 // replayed: a later explicit request can establish a new connection instead.
 static void LCDiscardGuestOrientationConnection(NSXPCConnection *connection) {
     if (!connection || LCGuestOrientationConnection != connection) return;
     LCGuestOrientationConnection = nil;
+    if (LCGuestPlaybackSupported) LCSetGuestPlaybackState(LCDisconnectedPlaybackState());
     [connection invalidate];
 }
 
 static NSXPCConnection *LCGetGuestOrientationConnection(void) {
     if (LCGuestOrientationConnection) return LCGuestOrientationConnection;
+    if (!LCGuestOrientationEndpoint) return nil;
     NSXPCConnection *connection = [[NSXPCConnection alloc] initWithListenerEndpoint:LCGuestOrientationEndpoint];
     connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(LCOrientationHost)];
+    if (LCGuestPlaybackSupported) {
+        LCGuestPlaybackObserver *observer = [LCGuestPlaybackObserver new];
+        observer.connection = connection;
+        connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(LCContainerPlaybackGuest)];
+        connection.exportedObject = observer;
+    }
     __weak NSXPCConnection *weakConnection = connection;
     void (^connectionEnded)(void) = ^{
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -44,8 +78,21 @@ static NSXPCConnection *LCGetGuestOrientationConnection(void) {
     connection.invalidationHandler = connectionEnded;
     LCGuestOrientationConnection = connection;
     [connection resume];
+    if (LCGuestPlaybackSupported) {
+        id<LCOrientationHost> host = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{ LCDiscardGuestOrientationConnection(weakConnection); });
+        }];
+        [host observeContainerPlaybackState];
+    }
     return connection;
 }
+
+@implementation UIApplication (LCContainerPlayback)
+- (NSDictionary *)lc_containerPlaybackState {
+    if (LCGuestPlaybackSupported) LCGetGuestOrientationConnection();
+    return LCGuestPlaybackState ?: LCDisconnectedPlaybackState();
+}
+@end
 
 static BOOL LCIsMainOrientationScene(UIWindowScene *scene) {
     if (scene.activationState != UISceneActivationStateForegroundActive || scene.screen != UIScreen.mainScreen) return NO;
@@ -77,6 +124,10 @@ static void LCInitGuestOrientationBridge(void) {
         id endpoint = [handler retrievedAppInfo][LCOrientationEndpointKey];
         if (![endpoint isKindOfClass:NSXPCListenerEndpoint.class]) return;
         LCGuestOrientationEndpoint = endpoint;
+        LCGuestPlaybackSupported = [[handler retrievedAppInfo][LCContainerPlaybackVersionKey] isEqual:@1];
+        if (LCGuestPlaybackSupported) {
+            dispatch_async(dispatch_get_main_queue(), ^{ LCGetGuestOrientationConnection(); });
+        }
         swizzle(UIWindowScene.class, @selector(requestGeometryUpdateWithPreferences:errorHandler:), @selector(lc_requestGeometryUpdateWithPreferences:errorHandler:));
     }
 }
