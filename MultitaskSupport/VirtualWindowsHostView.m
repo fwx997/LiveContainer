@@ -13,7 +13,27 @@
     self = [super initWithFrame:frame];
     self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.shouldForwardTapAction = YES;
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(hostSceneDidActivate:) name:UISceneDidActivateNotification object:nil];
     return self;
+}
+- (void)hostSceneDidActivate:(NSNotification *)notification {
+    if (notification.object == self.window.windowScene) {
+        [self setNeedsLayout];
+    }
+}
+- (void)safeAreaInsetsDidChange {
+    [super safeAreaInsetsDidChange];
+    [self setNeedsLayout];
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    for (UIView *view in self.subviews) {
+        DecoratedAppSceneViewController *controller = (id)view._viewDelegate;
+        if ([controller isKindOfClass:DecoratedAppSceneViewController.class]) {
+            // Guest scene callbacks stop after termination; host layout must not.
+            [controller updateMaximizedFrame];
+        }
+    }
 }
 - (BOOL)handleStatusBarTapAction:(UIAction *)action {
     if(!self.shouldForwardTapAction) return NO;

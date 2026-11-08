@@ -15,6 +15,7 @@
 @property(nonatomic) CGRect originalFrame;
 @property(nonatomic) UIBarButtonItem *maximizeButton;
 @property(nonatomic) bool isAppTerminationRequested;
+@property(nonatomic) BOOL hasAppTerminated;
 @end
 
 @implementation DecoratedAppSceneViewController
@@ -287,6 +288,8 @@
         CGRect maxFrame = UIEdgeInsetsInsetRect(self.view.window.frame, self.view.window.safeAreaInsets);
         CGRect newFrame = CGRectMake(self.originalFrame.origin.x * maxFrame.size.width, self.originalFrame.origin.y * maxFrame.size.height, self.originalFrame.size.width, self.originalFrame.size.height);
         [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
+            self.isMaximized = NO;
+            [self updateVerticalConstraints];
             self.view.frame = newFrame;
             self.view.layer.borderWidth = 1;
             self.resizeHandle.alpha = 1;
@@ -295,7 +298,6 @@
             
             [self.view layoutIfNeeded];
         } completion:^(BOOL finished) {
-            self.isMaximized = NO;
             UIImage *maximizeImage = [UIImage systemImageNamed:@"arrow.up.left.and.arrow.down.right.circle"];
             UIImageConfiguration *maximizeConfig = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightMedium];
             self.maximizeButton.image = [maximizeImage imageWithConfiguration:maximizeConfig];
@@ -324,6 +326,7 @@
 }
 
 - (void)appSceneVCAppDidExit:(AppSceneViewController*)vc {
+    self.hasAppTerminated = YES;
     BOOL skipTerminationScreen = [NSUserDefaults.lcSharedDefaults boolForKey:@"LCSkipTerminatedScreen"];
     BOOL isManual = _isAppTerminationRequested;
     if(isManual || skipTerminationScreen) {
@@ -342,6 +345,8 @@
             [MultitaskRelaunchManager scheduleRelaunchIfNeededWithBundleId:self.appSceneVC.bundleId dataUUID:self.dataUUID isManualTermination:isManual];
         }
     } else {
+        // The host controls must stay usable after the guest scene is invalidated.
+        [self updateVerticalConstraints];
         UILabel *label = [[UILabel alloc] initWithFrame:self.view.bounds];
         label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         label.lineBreakMode = NSLineBreakByWordWrapping;
@@ -491,13 +496,14 @@
     [self.view layoutIfNeeded];
     [UIView animateWithDuration:0.3 animations:^{
         BOOL bottomWindowBar = [NSUserDefaults.lcSharedDefaults boolForKey:@"LCMultitaskBottomWindowBar"];
-        BOOL hideWindowBar = MultitaskDockManager.shared.isCollapsed && self.isMaximized;
+        BOOL hideWindowBar = MultitaskDockManager.shared.isCollapsed && self.isMaximized && !self.hasAppTerminated;
         CGFloat navBarHeight = hideWindowBar ? 0 : 44;
         self.navigationBar.alpha = hideWindowBar ? 0 : 1;
         self.navigationBar.hidden = hideWindowBar;
         
         // Update safe area insets
         if(self.isMaximized) {
+            [self updateMaximizedFrame];
             self.appSceneVC.shouldSkipDebounceOnce = YES;
             __weak typeof(self) weakSelf = self;
             [self.appSceneVC updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
@@ -559,8 +565,30 @@
 }
 
 - (void)updateMaximizedFrameWithSettings:(UIMutableApplicationSceneSettings *)settings {
-    CGRect maxFrame = UIEdgeInsetsInsetRect(self.view.window.frame, [self updateMaximizedSafeAreaWithSettings:settings]);
-    self.view.frame = maxFrame;
+    [self updateMaximizedSafeAreaWithSettings:settings];
+    [self updateMaximizedFrame];
+}
+
+- (void)updateMaximizedFrame {
+    UIWindow *window = self.view.window;
+    UIView *hostView = self.view.superview;
+    if (!self.isMaximized || !window || !hostView || !CGAffineTransformIsIdentity(self.view.transform)) return;
+
+    UIEdgeInsets insets = window.safeAreaInsets;
+    if (!self.hasAppTerminated) {
+        // Running guests keep their existing edge-to-edge content layout.
+        insets.left = insets.right = insets.bottom = 0;
+        BOOL landscapePhone = UIDevice.currentDevice.userInterfaceIdiom != UIUserInterfaceIdiomPad &&
+            UIInterfaceOrientationIsLandscape(window.windowScene.interfaceOrientation);
+        if (self.navigationBar.hidden || [NSUserDefaults.lcSharedDefaults boolForKey:@"LCMultitaskBottomWindowBar"] || landscapePhone) {
+            insets.top = 0;
+        }
+    }
+    // Window bounds must be converted to the hosting view's coordinate space.
+    CGRect frame = [hostView convertRect:UIEdgeInsetsInsetRect(window.bounds, insets) fromView:window];
+    if (!CGRectEqualToRect(self.view.frame, frame)) {
+        self.view.frame = frame;
+    }
 }
 
 - (void)updateWindowedFrameWithSettings:(UIMutableApplicationSceneSettings *)settings {

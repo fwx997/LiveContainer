@@ -1,4 +1,4 @@
-"""Execute the production refresh coordinator against deterministic XPC substitutes."""
+"""Execute production refresh, callback routing and guest window lifecycle checks."""
 
 import argparse
 import json
@@ -47,6 +47,27 @@ def production_method(source, signature):
 
 
 class BackgroundRefreshTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "macOS Foundation is required for the window lifecycle checks")
+    def test_terminated_guest_window_controls(self):
+        decorated = (ROOT / "MultitaskSupport/DecoratedAppSceneViewController.m").read_text(encoding="utf-8")
+        host = (ROOT / "MultitaskSupport/VirtualWindowsHostView.m").read_text(encoding="utf-8")
+        harness = Path(__file__).with_name("MultitaskWindowHarness.m").read_text(encoding="utf-8")
+        methods = {
+            "INSERT_MAXIMIZED_FRAME": production_method(decorated, "- (void)updateMaximizedFrame {"),
+            "INSERT_VERTICAL_CONSTRAINTS": production_method(decorated, "- (void)updateVerticalConstraints {"),
+            "INSERT_HOST_LAYOUT": production_method(host, "- (void)layoutSubviews {"),
+            "INSERT_HOST_ACTIVATION": production_method(host, "- (void)hostSceneDidActivate:"),
+            "INSERT_SAFE_AREA_CHANGE": production_method(host, "- (void)safeAreaInsetsDidChange {"),
+        }
+        for marker, method in methods.items():
+            harness = harness.replace("// " + marker, method)
+        with tempfile.TemporaryDirectory(prefix="lc-window-tests-") as directory:
+            source = Path(directory) / "WindowHarness.m"
+            executable = Path(directory) / "WindowHarness"
+            source.write_text(harness, encoding="utf-8")
+            subprocess.run(["clang", "-fobjc-arc", "-framework", "Foundation", "-framework", "CoreGraphics", str(source), "-o", str(executable)], check=True, timeout=60)
+            subprocess.run([str(executable)], check=True, timeout=10)
+
     def test_english_and_chinese_error_resources(self):
         catalog = json.loads((ROOT / "SideStoreSupport/Localizable.xcstrings").read_text(encoding="utf-8"))
         messages = set(re.findall(r'refreshError\("([^"\\]+)"\)', SOURCE.read_text(encoding="utf-8")))
