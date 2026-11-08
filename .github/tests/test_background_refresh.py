@@ -28,6 +28,7 @@ def production_coordinator():
         "UNNotificationRequest": "FakeNotificationRequest",
         "UNUserNotificationCenter": "FakeNotificationCenter",
         "DispatchTime.now() + 27": "DispatchTime.now() + Fixture.refreshBudget",
+        "DispatchQueue.main.asyncAfter(deadline: deadline)": "Fixture.scheduleDeadline(deadline: deadline)",
     }
     for original, replacement in substitutions.items():
         source = source.replace(original, replacement)

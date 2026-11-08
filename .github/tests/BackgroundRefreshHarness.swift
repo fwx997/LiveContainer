@@ -32,6 +32,19 @@ enum Fixture {
     static var replyDelay: UInt64 = 0
     static var requests: [String] = []
     static var extensionKilled = 0
+    static var manualDeadline = false
+    static var scheduledDeadlines = 0
+    static var deadlinePrecededLaunch = false
+    static var deadlineAction: (() -> Void)?
+
+    static func scheduleDeadline(deadline: DispatchTime, execute: @escaping () -> Void) {
+        scheduledDeadlines += 1
+        if manualDeadline {
+            deadlineAction = execute
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: deadline, execute: execute)
+        }
+    }
 
     static func reset() {
         reporter = nil
@@ -49,6 +62,10 @@ enum Fixture {
         replyDelay = 0
         requests = []
         extensionKilled = 0
+        manualDeadline = false
+        scheduledDeadlines = 0
+        deadlinePrecededLaunch = false
+        deadlineAction = nil
     }
 }
 
@@ -108,6 +125,7 @@ final class FakeExtension {
     func setRequestInterruptionBlock(_ callback: @escaping (UUID) -> Void) { interruption = callback }
     func setRequestCancellationBlock(_ callback: @escaping (UUID, Error?) -> Void) { cancellation = callback }
     func beginRequest(withInputItems items: [FakeExtensionItem]) async -> UUID {
+        Fixture.deadlinePrecededLaunch = Fixture.scheduledDeadlines == 1
         let identifier = UUID()
         if Fixture.launchDelay > 0 { try? await Task.sleep(nanoseconds: Fixture.launchDelay) }
         if Fixture.interruptLaunching {
@@ -296,14 +314,24 @@ enum Regression {
     @MainActor
     static func deadlineRegression() async throws {
         Fixture.reset()
-        Fixture.refreshBudget = 0.6
-        Fixture.launchDelay = 400_000_000
-        Fixture.replyDelay = 400_000_000
+        Fixture.refreshBudget = 5
+        Fixture.manualDeadline = true
         Fixture.finishImmediately = false
         let handler = RefreshHandler()
+        let pending = Task { @MainActor in try await refresh(handler) }
+        let dispatchDeadline = DispatchTime.now() + 2
+        while Fixture.requests.isEmpty {
+            require(DispatchTime.now() < dispatchDeadline, "Cold launch did not dispatch the refresh")
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        require(Fixture.deadlinePrecededLaunch && Fixture.scheduledDeadlines == 1,
+                "Cold startup was excluded from the shared intent deadline")
+        require(Fixture.deadlineAction != nil, "The intent deadline was not scheduled")
+        Fixture.deadlineAction?()
+        Fixture.deadlineAction = nil
         do {
-            try await refresh(handler)
-            fatalError("Cold startup time was excluded from the intent budget")
+            try await pending.value
+            fatalError("The intent deadline did not detach its waiter")
         } catch {
             require(error.localizedDescription.contains("may still be running"), "Unexpected deadline error: \(error)")
         }
@@ -315,8 +343,11 @@ enum Regression {
         } catch {
             require(error.localizedDescription.contains("Another refresh"), "Lost in-flight state")
         }
+        // Deliver the late result only after proving that the request stays busy.
+        // A wall-clock reply could arrive before that assertion on a loaded runner.
+        handler.finish(nil, requestIdentifier: Fixture.requests[0])
         try await waitForIdle(handler)
-        Fixture.replyDelay = 0
+        Fixture.manualDeadline = false
         Fixture.finishImmediately = true
         try await refresh(handler)
         require(Fixture.extensionKilled == 0, "The late result or old deadline killed the extension")
