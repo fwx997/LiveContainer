@@ -1,9 +1,12 @@
 #!/bin/sh
 set -eu
 
-# Verify the refresh lifecycle on the selected Xcode before packaging either IPA.
-python3 .github/tests/test_background_refresh.py --require-swift -v || exit $?
-python3 -m unittest discover -s .github/tests -p test_ipa_packaging.py -v
+# Routine builds retain their regression gate. Explicit package-only runs keep
+# cloud time for compilation and verify the resulting package below.
+if [ "${LC_PACKAGE_ONLY:-0}" != "1" ]; then
+    python3 .github/tests/test_background_refresh.py --require-swift -v || exit $?
+    python3 -m unittest discover -s .github/tests -p test_ipa_packaging.py -v
+fi
 
 # Build the same pinned converter for the runner's own CPU architecture.
 # The release download is ARM-only and cannot execute on Intel runners.

@@ -23,6 +23,8 @@ static NSXPCListenerEndpoint *LCGuestOrientationEndpoint;
 static NSXPCConnection *LCGuestOrientationConnection;
 static BOOL LCGuestPlaybackSupported;
 static NSDictionary *LCGuestPlaybackState;
+static NSUInteger LCGuestOrientationVersion;
+static BOOL LCGuestUsesExplicitOrientation;
 
 static NSDictionary *LCDisconnectedPlaybackState(void) {
     return @{@"version": @1, @"supported": @(LCGuestPlaybackSupported),
@@ -92,17 +94,59 @@ static NSXPCConnection *LCGetGuestOrientationConnection(void) {
     if (LCGuestPlaybackSupported) LCGetGuestOrientationConnection();
     return LCGuestPlaybackState ?: LCDisconnectedPlaybackState();
 }
+
+- (void)lc_requestFullscreen:(NSNumber *)fullscreen completion:(LCOrientationReply)completion {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LCOrientationReply finish = LCOrientationReplyOnce(completion);
+        if (!LCGuestOrientationEndpoint || LCGuestOrientationVersion < LCOrientationBridgeVersion) {
+            finish(LCOrientationFailure(@"unsupported", NO));
+            return;
+        }
+        // This is an explicit action from the guest in the authenticated XPC
+        // session. The host checks visibility; a virtual guest need not own a
+        // normal UIKit key window in its extension process.
+        LCGuestUsesExplicitOrientation = YES;
+        NSXPCConnection *connection = LCGetGuestOrientationConnection();
+        if (!connection) {
+            finish(LCOrientationFailure(@"connection_unavailable", YES));
+            return;
+        }
+        __weak NSXPCConnection *weakConnection = connection;
+        id<LCOrientationHost> host = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                LCDiscardGuestOrientationConnection(weakConnection);
+                finish(LCOrientationFailure(@"connection_failed", YES));
+            });
+        }];
+        UIInterfaceOrientationMask orientations = fullscreen.boolValue ? UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskPortrait;
+        [host requestInterfaceOrientations:orientations fullscreen:fullscreen.boolValue reply:^(NSDictionary *state) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!weakConnection || LCGuestOrientationConnection != weakConnection) {
+                    finish(LCOrientationFailure(@"connection_lost", YES));
+                    return;
+                }
+                finish(state);
+            });
+        }];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            finish(LCOrientationFailure(@"connection_timeout", YES));
+        });
+    });
+}
 @end
 
 static BOOL LCIsMainOrientationScene(UIWindowScene *scene) {
     if (scene.activationState != UISceneActivationStateForegroundActive || scene.screen != UIScreen.mainScreen) return NO;
-    UIWindow *keyWindow = UIApplication.sharedApplication.keyWindow;
-    return keyWindow.windowScene == scene && !keyWindow.hidden && keyWindow.alpha > 0 && keyWindow.rootViewController;
+    for (UIWindow *window in scene.windows) {
+        if (!window.hidden && window.alpha > 0 && window.rootViewController) return YES;
+    }
+    return NO;
 }
 
 static void LCForwardGuestOrientationRequest(UIWindowScene *scene, UIInterfaceOrientationMask orientations) {
     __weak UIWindowScene *weakScene = scene;
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (LCGuestUsesExplicitOrientation) return;
         if (!weakScene || !LCIsMainOrientationScene(weakScene)) return;
         NSXPCConnection *connection = LCGetGuestOrientationConnection();
         __weak NSXPCConnection *weakConnection = connection;
@@ -124,6 +168,7 @@ static void LCInitGuestOrientationBridge(void) {
         id endpoint = [handler retrievedAppInfo][LCOrientationEndpointKey];
         if (![endpoint isKindOfClass:NSXPCListenerEndpoint.class]) return;
         LCGuestOrientationEndpoint = endpoint;
+        LCGuestOrientationVersion = [[handler retrievedAppInfo][LCOrientationBridgeVersionKey] unsignedIntegerValue];
         LCGuestPlaybackSupported = [[handler retrievedAppInfo][LCContainerPlaybackVersionKey] isEqual:@1];
         if (LCGuestPlaybackSupported) {
             dispatch_async(dispatch_get_main_queue(), ^{ LCGetGuestOrientationConnection(); });

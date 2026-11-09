@@ -14,13 +14,24 @@ def production_harness():
     host = (ROOT / "MultitaskSupport/VirtualWindowsHostView.m").read_text(encoding="utf-8")
     decorated = (ROOT / "MultitaskSupport/DecoratedAppSceneViewController.m").read_text(encoding="utf-8")
     harness = Path(__file__).with_name("OrientationBridgeHarness.m").read_text(encoding="utf-8")
+    transaction_start = host.index("@interface LCOrientationTransaction")
+    transaction_end = host.index("@interface VirtualWindowsHostView", transaction_start)
+    harness = harness.replace("// INSERT_TRANSACTION", host[transaction_start:transaction_end])
+    bridge = (ROOT / "LiveContainer/LCOrientationBridge.h").read_text(encoding="utf-8")
+    harness = harness.replace("// INSERT_REPLY_HELPERS", bridge[bridge.index("static const NSUInteger LCOrientationBridgeVersion"):bridge.index("@protocol LCContainerPlaybackGuest")])
     host_signatures = [
         "+ (UIInterfaceOrientationMask)defaultInterfaceOrientations",
         "+ (UIInterfaceOrientationMask)supportedInterfaceOrientationsForWindow:",
         "- (DecoratedAppSceneViewController *)frontmostController",
         "- (BOOL)isOrientationOwnerEligible:",
         "- (BOOL)canControlOrientation:",
-        "- (void)requestInterfaceOrientations:",
+        "- (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations forController:",
+        "- (NSString *)fullscreenRejectionForController:",
+        "- (NSDictionary *)orientationStateForController:",
+        "- (void)finishOrientationTransaction:",
+        "- (void)failOrientationTransaction:",
+        "- (void)checkOrientationTransaction:",
+        "- (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations\n",
         "- (void)releaseOrientationForController:",
         "- (void)restoreHostOrientationIfNeeded",
         "- (void)validateOrientationOwner",
@@ -34,6 +45,7 @@ def production_harness():
     decorated_signatures = [
         "- (void)releaseHostOrientation",
         "- (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:",
+        "- (void)appSceneVC:(AppSceneViewController *)vc\n",
         "- (void)appSceneVCOrientationConnectionDidInvalidate:",
         "- (void)closeWindow",
         "- (void)minimizeWindow {",
@@ -120,6 +132,11 @@ class OrientationBridgeTests(unittest.TestCase):
 
     def test_only_matching_guest_and_connection_callbacks_reach_the_host(self):
         self.run_scenario("guest-routing")
+
+    def test_explicit_fullscreen_reports_actual_geometry_and_releases(self):
+        for scenario in ["v2-non-key", "v2-floating", "v2-release", "v2-denials", "v2-timeout", "v2-stale", "v2-once"]:
+            with self.subTest(scenario=scenario):
+                self.run_scenario(scenario)
 
 
 if __name__ == "__main__":

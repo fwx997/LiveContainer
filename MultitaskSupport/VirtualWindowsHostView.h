@@ -14,5 +14,9 @@ API_AVAILABLE(ios(16.0))
 - (BOOL)handleStatusBarTapAction:(UIAction *)action;
 + (UIInterfaceOrientationMask)supportedInterfaceOrientationsForWindow:(UIWindow *)window;
 - (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations forController:(DecoratedAppSceneViewController *)controller;
+- (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations
+                       forController:(DecoratedAppSceneViewController *)controller
+                           fullscreen:(BOOL)fullscreen
+                                reply:(void (^)(NSDictionary *state))reply;
 - (void)releaseOrientationForController:(DecoratedAppSceneViewController *)controller;
 @end

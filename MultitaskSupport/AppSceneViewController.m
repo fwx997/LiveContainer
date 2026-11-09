@@ -21,6 +21,7 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic, strong) NSXPCListener *listener;
 @property(nonatomic, strong) NSXPCConnection *connection;
 @property(nonatomic) BOOL invalidated;
+@property(nonatomic) BOOL usesExplicitOrientation;
 @property(nonatomic) BOOL observingPlayback, pictureInPictureActive, hostActive;
 - (void)publishPlaybackState;
 - (void)invalidate;
@@ -61,6 +62,7 @@ API_AVAILABLE(ios(16.0))
                 if (receiver.connection != weakConnection) return;
                 receiver.connection = nil;
                 receiver.observingPlayback = NO;
+                receiver.usesExplicitOrientation = NO;
             }
             AppSceneViewController *vc = receiver.sceneViewController;
             if ([vc.delegate respondsToSelector:@selector(appSceneVCOrientationConnectionDidInvalidate:)]) {
@@ -81,10 +83,30 @@ API_AVAILABLE(ios(16.0))
         @synchronized (receiver) {
             if (receiver.invalidated || receiver.connection != originConnection) return;
         }
+        if (receiver.usesExplicitOrientation) return;
         AppSceneViewController *vc = receiver.sceneViewController;
         if ([vc.delegate respondsToSelector:@selector(appSceneVC:didRequestInterfaceOrientations:)]) {
             [vc.delegate appSceneVC:vc didRequestInterfaceOrientations:orientations];
         }
+    });
+}
+
+- (void)requestInterfaceOrientations:(NSUInteger)orientations fullscreen:(BOOL)fullscreen reply:(LCOrientationReply)reply {
+    NSXPCConnection *origin = NSXPCConnection.currentConnection;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LCOrientationReply finish = LCOrientationReplyOnce(reply);
+        if (self.invalidated || !origin || self.connection != origin) {
+            finish(LCOrientationFailure(@"connection_lost", YES));
+            return;
+        }
+        self.usesExplicitOrientation = YES;
+        AppSceneViewController *vc = self.sceneViewController;
+        SEL selector = @selector(appSceneVC:didRequestInterfaceOrientations:fullscreen:reply:);
+        if (!vc.isAppRunning || ![vc.delegate respondsToSelector:selector]) {
+            finish(LCOrientationFailure(@"guest_unavailable", YES));
+            return;
+        }
+        [vc.delegate appSceneVC:vc didRequestInterfaceOrientations:orientations fullscreen:fullscreen reply:finish];
     });
 }
 
@@ -197,6 +219,7 @@ static __weak AppSceneViewController *cellularSideStoreScene;
         self.orientationReceiver = [LCOrientationRequestReceiver new];
         self.orientationReceiver.sceneViewController = self;
         userInfo[LCOrientationEndpointKey] = self.orientationReceiver.listener.endpoint;
+        userInfo[LCOrientationBridgeVersionKey] = @(LCOrientationBridgeVersion);
         userInfo[LCContainerPlaybackVersionKey] = @1;
     }
     

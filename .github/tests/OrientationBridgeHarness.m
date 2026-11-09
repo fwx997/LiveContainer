@@ -30,6 +30,19 @@ enum { UIApplicationStateActive, UIApplicationStateInactive, UIApplicationStateB
 enum { UIViewAnimationOptionCurveEaseInOut, UIViewAnimationOptionTransitionCurlUp };
 enum { UIViewAutoresizingFlexibleWidth = 1, UIViewAutoresizingFlexibleHeight = 2 };
 enum { NSLineBreakByWordWrapping, NSTextAlignmentCenter, UIImageSymbolWeightMedium };
+static BOOL UIInterfaceOrientationIsLandscape(UIInterfaceOrientation orientation) { return orientation == 3 || orientation == 4; }
+typedef double CFTimeInterval;
+static CFTimeInterval fixtureClock;
+static CFTimeInterval CACurrentMediaTime(void) { return fixtureClock; }
+static NSMutableArray *scheduledChecks;
+static void scheduleCheck(dispatch_time_t when, dispatch_queue_t queue, dispatch_block_t block) {
+    if (!scheduledChecks) scheduledChecks = [NSMutableArray new];
+    [scheduledChecks addObject:[block copy]];
+}
+#define dispatch_after scheduleCheck
+// INSERT_REPLY_HELPERS
+@class DecoratedAppSceneViewController;
+// INSERT_TRANSACTION
 typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 static CGRect UIEdgeInsetsInsetRect(CGRect rect, UIEdgeInsets insets) {
     return CGRectMake(rect.origin.x + insets.left, rect.origin.y + insets.top,
@@ -79,6 +92,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 @property UIInterfaceOrientation interfaceOrientation;
 @property NSMutableArray<NSNumber *> *requests;
 @property NSMutableArray *failures;
+@property BOOL holdGeometry;
 - (void)requestGeometryUpdateWithPreferences:(UIWindowSceneGeometryPreferencesIOS *)preferences errorHandler:(void (^)(NSError *))handler;
 - (void)failRequest:(NSUInteger)index;
 @end
@@ -93,6 +107,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 - (void)requestGeometryUpdateWithPreferences:(UIWindowSceneGeometryPreferencesIOS *)preferences errorHandler:(void (^)(NSError *))handler {
     [self.requests addObject:@(preferences.interfaceOrientations)];
     [self.failures addObject:[handler copy]];
+    if (self.holdGeometry) return;
     if (preferences.interfaceOrientations & (1UL << self.interfaceOrientation)) return;
     for (NSInteger orientation = 1; orientation <= 4; ++orientation) {
         if (!(preferences.interfaceOrientations & (1UL << orientation))) continue;
@@ -140,6 +155,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 - (void)setNeedsLayout;
 + (void)animateWithDuration:(double)duration delay:(double)delay options:(NSUInteger)options animations:(void (^)(void))animations completion:(void (^)(BOOL))completion;
 + (void)transitionWithView:(UIView *)view duration:(double)duration options:(NSUInteger)options animations:(void (^)(void))animations completion:(void (^)(BOOL))completion;
++ (void)performWithoutAnimation:(void (^)(void))actions;
 @end
 @implementation UIView
 - (instancetype)init {
@@ -180,6 +196,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 - (void)layoutSubviews {}
 - (void)layoutIfNeeded {}
 - (void)setNeedsLayout { self.needsLayout = YES; }
++ (void)performWithoutAnimation:(void (^)(void))actions { actions(); }
 + (void)animateWithDuration:(double)duration delay:(double)delay options:(NSUInteger)options animations:(void (^)(void))animations completion:(void (^)(BOOL))completion {
     animations();
     if (completion) completion(YES);
@@ -254,6 +271,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 @interface AppSceneViewController : NSObject
 @property BOOL isAppRunning, shouldIgnoreSceneUpdates, terminationRequested;
 @property NSString *bundleId;
+@property UIView *view, *contentView;
 - (void)terminate;
 - (void)updateSettingsWithBlock:(void (^)(UIMutableApplicationSceneSettings *))block;
 @end
@@ -286,6 +304,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 @property UIBarButtonItem *maximizeButton;
 - (void)releaseHostOrientation;
 - (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations;
+- (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations fullscreen:(BOOL)fullscreen reply:(void (^)(NSDictionary *))reply;
 - (void)appSceneVCOrientationConnectionDidInvalidate:(AppSceneViewController *)vc;
 - (void)closeWindow;
 - (void)minimizeWindow;
@@ -301,6 +320,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 
 @interface VirtualWindowsHostView : UIView
 @property(nonatomic, weak) DecoratedAppSceneViewController *orientationOwner;
+@property(nonatomic, weak) DecoratedAppSceneViewController *fullscreenMaximizedController;
 @property UIInterfaceOrientationMask requestedOrientations, restorationOrientations;
 @property NSUInteger orientationGeneration;
 + (UIInterfaceOrientationMask)defaultInterfaceOrientations;
@@ -309,6 +329,12 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 - (BOOL)isOrientationOwnerEligible:(DecoratedAppSceneViewController *)controller;
 - (BOOL)canControlOrientation:(DecoratedAppSceneViewController *)controller;
 - (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations forController:(DecoratedAppSceneViewController *)controller;
+- (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations forController:(DecoratedAppSceneViewController *)controller fullscreen:(BOOL)fullscreen reply:(void (^)(NSDictionary *))reply;
+- (NSString *)fullscreenRejectionForController:(DecoratedAppSceneViewController *)controller;
+- (NSDictionary *)orientationStateForController:(DecoratedAppSceneViewController *)controller accepted:(BOOL)accepted applied:(BOOL)applied reason:(NSString *)reason;
+- (void)finishOrientationTransaction:(LCOrientationTransaction *)request applied:(BOOL)applied reason:(NSString *)reason;
+- (void)failOrientationTransaction:(LCOrientationTransaction *)request reason:(NSString *)reason;
+- (void)checkOrientationTransaction:(LCOrientationTransaction *)request;
 - (void)releaseOrientationForController:(DecoratedAppSceneViewController *)controller;
 - (void)restoreHostOrientationIfNeeded;
 - (void)validateOrientationOwner;
@@ -343,6 +369,8 @@ static DecoratedAppSceneViewController *addGuest(Fixture *fixture, NSString *ide
     controller.dataUUID = identifier;
     controller.isMaximized = YES;
     controller.appSceneVC = [AppSceneViewController new];
+    controller.appSceneVC.view = controller.view;
+    controller.appSceneVC.contentView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 390, 788)];
     controller.appSceneVC.isAppRunning = YES;
     controller.resizeHandle = [UIView new];
     controller.maximizeButton = [UIBarButtonItem new];
@@ -353,6 +381,8 @@ static DecoratedAppSceneViewController *addGuest(Fixture *fixture, NSString *ide
 }
 
 static Fixture *fixture(void) {
+    fixtureClock = 0;
+    scheduledChecks = [NSMutableArray new];
     UIDevice.currentDevice.userInterfaceIdiom = UIUserInterfaceIdiomPhone;
     UIApplication.sharedApplication.applicationState = UIApplicationStateActive;
     [NSUserDefaults.lcSharedDefaults removeObjectForKey:@"LCSkipTerminatedScreen"];
@@ -565,6 +595,74 @@ static void guestRouting(void) {
     require(f.host.orientationOwner == f.guest, @"Another guest's disconnected connection released this owner");
 }
 
+static void flushChecks(void) {
+    NSArray *checks = scheduledChecks.copy;
+    [scheduledChecks removeAllObjects];
+    for (dispatch_block_t check in checks) check();
+}
+
+static void setGeometry(Fixture *f, BOOL landscape) {
+    f.window.bounds = CGRectMake(0, 0, landscape ? 844 : 390, landscape ? 390 : 844);
+    f.guest.appSceneVC.contentView.bounds = CGRectMake(0, 0, landscape ? 844 : 390, landscape ? 334 : 788);
+    f.window.windowScene.interfaceOrientation = landscape ? UIInterfaceOrientationLandscapeLeft : UIInterfaceOrientationPortrait;
+}
+
+static void explicitScenario(NSString *scenario) {
+    Fixture *f = fixture();
+    __block NSDictionary *result;
+    __block NSUInteger replies = 0;
+    LCOrientationReply reply = ^(NSDictionary *state) { result = state; ++replies; };
+    if ([scenario isEqual:@"v2-once"]) {
+        LCOrientationReply finish = LCOrientationReplyOnce(reply);
+        finish(@{@"first": @YES}); finish(@{@"first": @NO});
+        require(replies == 1 && [result[@"first"] boolValue], @"Reply was completed more than once");
+        return;
+    }
+    if ([scenario isEqual:@"v2-denials"]) {
+        setBackground(f, YES);
+        [f.host requestInterfaceOrientations:UIInterfaceOrientationMaskLandscape forController:f.guest fullscreen:YES reply:reply];
+        require([result[@"reason"] isEqual:@"host_inactive"] && ![result[@"accepted"] boolValue], @"Explicit background request was not denied");
+        setBackground(f, NO);
+        f.window.rootViewController.presentedViewController = [UIViewController new];
+        [f.host requestInterfaceOrientations:UIInterfaceOrientationMaskLandscape forController:f.guest fullscreen:YES reply:reply];
+        require([result[@"reason"] isEqual:@"host_modal"] && !f.window.windowScene.requests.count, @"Modal did not block explicit rotation");
+        return;
+    }
+    if ([scenario isEqual:@"v2-non-key"]) f.window.isKeyWindow = NO;
+    if ([scenario isEqual:@"v2-floating"]) f.guest.isMaximized = NO;
+    [f.guest appSceneVC:f.guest.appSceneVC didRequestInterfaceOrientations:UIInterfaceOrientationMaskLandscape fullscreen:YES reply:reply];
+    require(!result && f.host.orientationOwner == f.guest, @"Request reported success before host and guest geometry changed");
+    if ([scenario isEqual:@"v2-timeout"]) {
+        fixtureClock = 2.1;
+        flushChecks();
+        require(replies == 1 && [result[@"reason"] isEqual:@"geometry_timeout"] && !f.host.orientationOwner, @"Timeout left a stuck owner or lied about success");
+        [f.window.windowScene failRequest:0];
+        require(replies == 1, @"Late geometry error completed timed out request twice");
+        return;
+    }
+    if ([scenario isEqual:@"v2-stale"]) {
+        DecoratedAppSceneViewController *other = addGuest(f, @"B");
+        [other appSceneVC:other.appSceneVC didRequestInterfaceOrientations:UIInterfaceOrientationMaskLandscapeRight];
+        flushChecks();
+        [f.window.windowScene failRequest:0];
+        require([result[@"reason"] isEqual:@"superseded"] && f.host.orientationOwner == other, @"Stale transaction overwrote new owner");
+        return;
+    }
+    setGeometry(f, YES);
+    flushChecks();
+    require(replies == 1 && [result[@"applied"] boolValue] && f.guest.isMaximized, @"Explicit foreground fullscreen did not apply");
+    require([result[@"width"] doubleValue] > [result[@"height"] doubleValue], @"Successful receipt reported portrait geometry");
+    if ([scenario isEqual:@"v2-release"] || [scenario isEqual:@"v2-floating"]) {
+        result = nil;
+        [f.host requestInterfaceOrientations:UIInterfaceOrientationMaskPortrait forController:f.guest fullscreen:NO reply:reply];
+        require(!f.host.orientationOwner && !result, @"Exit did not release ownership or replied before portrait geometry");
+        setGeometry(f, NO);
+        flushChecks();
+        require(replies == 2 && [result[@"applied"] boolValue] && !f.host.requestedOrientations, @"Explicit exit did not finish in portrait");
+        if ([scenario isEqual:@"v2-floating"]) require(!f.guest.isMaximized, @"Explicit exit lost original floating window mode");
+    }
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         require(argc == 2, @"Expected an orientation scenario");
@@ -582,6 +680,7 @@ int main(int argc, const char *argv[]) {
         else if ([scenario isEqual:@"background-exit"]) backgroundExit();
         else if ([scenario isEqual:@"deferred-owner"]) deferredOwner();
         else if ([scenario isEqual:@"guest-routing"]) guestRouting();
+        else if ([scenario hasPrefix:@"v2-"]) explicitScenario(scenario);
         else require(NO, @"Unknown orientation scenario");
         printf("Orientation scenario passed: %s\n", argv[1]);
     }

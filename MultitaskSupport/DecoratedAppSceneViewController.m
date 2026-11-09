@@ -5,6 +5,7 @@
 #import "UIKitPrivate+MultitaskSupport.h"
 #import "PiPManager.h"
 #import "VirtualWindowsHostView.h"
+#import "../LiveContainer/LCOrientationBridge.h"
 #import "../LiveContainer/Localization.h"
 #import "utils.h"
 
@@ -400,6 +401,18 @@ static const CGFloat LCWindowTopBarExtension = 12;
 - (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations {
     if (vc != self.appSceneVC || ![self.view.superview isKindOfClass:VirtualWindowsHostView.class]) return;
     [(VirtualWindowsHostView *)self.view.superview requestInterfaceOrientations:orientations forController:self];
+}
+
+- (void)appSceneVC:(AppSceneViewController *)vc
+ didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations
+                       fullscreen:(BOOL)fullscreen
+                            reply:(void (^)(NSDictionary *))reply {
+    if (vc != self.appSceneVC || ![self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        reply(LCOrientationFailure(@"guest_not_attached", YES));
+        return;
+    }
+    [(VirtualWindowsHostView *)self.view.superview requestInterfaceOrientations:orientations
+         forController:self fullscreen:fullscreen reply:reply];
 }
 
 - (void)appSceneVCOrientationConnectionDidInvalidate:(AppSceneViewController *)vc {

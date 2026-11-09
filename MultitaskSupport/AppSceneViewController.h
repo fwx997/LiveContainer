@@ -20,6 +20,10 @@ API_AVAILABLE(ios(16.0))
 - (void)appSceneVC:(AppSceneViewController*)vc didUpdateFromSettings:(UIMutableApplicationSceneSettings *)settings transitionContext:(id)context lifecycleActionType:(uint32_t)actionType;
 - (void)appSceneVCWillActivateScene:(AppSceneViewController *)vc;
 - (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations;
+- (void)appSceneVC:(AppSceneViewController *)vc
+ didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations
+                       fullscreen:(BOOL)fullscreen
+                            reply:(void (^)(NSDictionary *state))reply;
 - (void)appSceneVCOrientationConnectionDidInvalidate:(AppSceneViewController *)vc;
 @end
 
