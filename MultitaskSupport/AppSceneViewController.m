@@ -99,7 +99,7 @@ API_AVAILABLE(ios(16.0))
             finish(LCOrientationFailure(@"connection_lost", YES));
             return;
         }
-        self.usesExplicitOrientation = YES;
+        self.usesExplicitOrientation = fullscreen;
         AppSceneViewController *vc = self.sceneViewController;
         SEL selector = @selector(appSceneVC:didRequestInterfaceOrientations:fullscreen:reply:);
         if (!vc.isAppRunning || ![vc.delegate respondsToSelector:selector]) {

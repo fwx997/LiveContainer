@@ -41,6 +41,8 @@ static void scheduleCheck(dispatch_time_t when, dispatch_queue_t queue, dispatch
 }
 #define dispatch_after scheduleCheck
 // INSERT_REPLY_HELPERS
+static BOOL LCGuestUsesExplicitOrientation, LCGuestExplicitFullscreenActive;
+// INSERT_GUEST_FORWARD_POLICY
 @class DecoratedAppSceneViewController;
 // INSERT_TRANSACTION
 typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
@@ -612,6 +614,16 @@ static void explicitScenario(NSString *scenario) {
     __block NSDictionary *result;
     __block NSUInteger replies = 0;
     LCOrientationReply reply = ^(NSDictionary *state) { result = state; ++replies; };
+    if ([scenario isEqual:@"v2-automatic-resume"]) {
+        LCGuestUsesExplicitOrientation = LCGuestExplicitFullscreenActive = YES;
+        require(!LCShouldForwardAutomaticOrientation(UIInterfaceOrientationMaskLandscape), @"Automatic request raced explicit fullscreen");
+        require(!LCShouldForwardAutomaticOrientation(UIInterfaceOrientationMaskAll), @"Active fullscreen released on unrelated reset");
+        LCGuestExplicitFullscreenActive = NO;
+        require(!LCShouldForwardAutomaticOrientation(UIInterfaceOrientationMaskPortrait), @"Exit restoration acquired a new orientation owner");
+        require(!LCShouldForwardAutomaticOrientation(UIInterfaceOrientationMaskAll), @"Exit reset acquired a new orientation owner");
+        require(LCShouldForwardAutomaticOrientation(UIInterfaceOrientationMaskLandscape), @"Later pages lost the automatic orientation bridge");
+        return;
+    }
     if ([scenario isEqual:@"v2-once"]) {
         LCOrientationReply finish = LCOrientationReplyOnce(reply);
         finish(@{@"first": @YES}); finish(@{@"first": @NO});

@@ -25,6 +25,7 @@ static BOOL LCGuestPlaybackSupported;
 static NSDictionary *LCGuestPlaybackState;
 static NSUInteger LCGuestOrientationVersion;
 static BOOL LCGuestUsesExplicitOrientation;
+static BOOL LCGuestExplicitFullscreenActive;
 
 static NSDictionary *LCDisconnectedPlaybackState(void) {
     return @{@"version": @1, @"supported": @(LCGuestPlaybackSupported),
@@ -108,6 +109,7 @@ static NSXPCConnection *LCGetGuestOrientationConnection(void) {
         // session. The host checks visibility; a virtual guest need not own a
         // normal UIKit key window in its extension process.
         LCGuestUsesExplicitOrientation = YES;
+        LCGuestExplicitFullscreenActive = fullscreen.boolValue;
         NSXPCConnection *connection = LCGetGuestOrientationConnection();
         if (!connection) {
             finish(LCOrientationFailure(@"connection_unavailable", YES));
@@ -145,10 +147,22 @@ static BOOL LCIsMainOrientationScene(UIWindowScene *scene) {
     return NO;
 }
 
+static BOOL LCShouldForwardAutomaticOrientation(UIInterfaceOrientationMask orientations) {
+    if (!LCGuestUsesExplicitOrientation) return YES;
+    // Flutter restores its original preference and then clears it after the
+    // explicit exit reply. Consume that reset without creating a new owner;
+    // later pages may use the normal automatic bridge again.
+    if (!LCGuestExplicitFullscreenActive &&
+        (orientations & UIInterfaceOrientationMaskAllButUpsideDown) == UIInterfaceOrientationMaskAllButUpsideDown) {
+        LCGuestUsesExplicitOrientation = NO;
+    }
+    return NO;
+}
+
 static void LCForwardGuestOrientationRequest(UIWindowScene *scene, UIInterfaceOrientationMask orientations) {
     __weak UIWindowScene *weakScene = scene;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (LCGuestUsesExplicitOrientation) return;
+        if (!LCShouldForwardAutomaticOrientation(orientations)) return;
         if (!weakScene || !LCIsMainOrientationScene(weakScene)) return;
         NSXPCConnection *connection = LCGetGuestOrientationConnection();
         __weak NSXPCConnection *weakConnection = connection;

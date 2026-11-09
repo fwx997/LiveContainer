@@ -19,6 +19,8 @@ def production_harness():
     harness = harness.replace("// INSERT_TRANSACTION", host[transaction_start:transaction_end])
     bridge = (ROOT / "LiveContainer/LCOrientationBridge.h").read_text(encoding="utf-8")
     harness = harness.replace("// INSERT_REPLY_HELPERS", bridge[bridge.index("static const NSUInteger LCOrientationBridgeVersion"):bridge.index("@protocol LCContainerPlaybackGuest")])
+    guest = (ROOT / "TweakLoader/UIKit+GuestHooks.m").read_text(encoding="utf-8")
+    harness = harness.replace("// INSERT_GUEST_FORWARD_POLICY", production_method(guest, "static BOOL LCShouldForwardAutomaticOrientation"))
     host_signatures = [
         "+ (UIInterfaceOrientationMask)defaultInterfaceOrientations",
         "+ (UIInterfaceOrientationMask)supportedInterfaceOrientationsForWindow:",
@@ -134,7 +136,7 @@ class OrientationBridgeTests(unittest.TestCase):
         self.run_scenario("guest-routing")
 
     def test_explicit_fullscreen_reports_actual_geometry_and_releases(self):
-        for scenario in ["v2-non-key", "v2-floating", "v2-release", "v2-restore-landscape", "v2-denials", "v2-timeout", "v2-stale", "v2-once"]:
+        for scenario in ["v2-non-key", "v2-floating", "v2-release", "v2-restore-landscape", "v2-denials", "v2-timeout", "v2-stale", "v2-once", "v2-automatic-resume"]:
             with self.subTest(scenario=scenario):
                 self.run_scenario(scenario)
 
