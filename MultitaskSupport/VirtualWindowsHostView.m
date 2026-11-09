@@ -122,7 +122,7 @@
                                        accepted:(BOOL)accepted applied:(BOOL)applied reason:(NSString *)reason {
     CGSize size = controller.appSceneVC.contentView.bounds.size;
     if (size.width <= 0 || size.height <= 0) size = controller.appSceneVC.view.bounds.size;
-    return @{@"version": @(LCOrientationBridgeVersion), @"supported": @YES,
+    return @{@"version": @(LCOrientationBridgeVersion), @"supported": @YES, @"container": @YES,
              @"accepted": @(accepted), @"applied": @(applied), @"reason": reason,
              @"orientation": @(self.window.windowScene.interfaceOrientation),
              @"width": @(size.width), @"height": @(size.height)};
@@ -216,6 +216,9 @@
         finish([self orientationStateForController:controller accepted:NO applied:NO reason:rejection]);
         return;
     }
+    // Returning from fullscreen restores the actual entry direction, which may
+    // already have been landscape. A guest's portrait default must not replace it.
+    if (!fullscreen && self.restorationOrientations) orientations = self.restorationOrientations;
     LCOrientationTransaction *request = [LCOrientationTransaction new];
     request.controller = controller;
     request.reply = finish;

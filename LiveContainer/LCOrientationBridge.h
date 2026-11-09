@@ -22,7 +22,7 @@ static inline LCOrientationReply LCOrientationReplyOnce(LCOrientationReply reply
 }
 
 static inline NSDictionary *LCOrientationFailure(NSString *reason, BOOL supported) {
-    return @{@"version": @(LCOrientationBridgeVersion), @"supported": @(supported),
+    return @{@"version": @(LCOrientationBridgeVersion), @"supported": @(supported), @"container": @(supported),
              @"accepted": @NO, @"applied": @NO, @"reason": reason,
              @"orientation": @0, @"width": @0, @"height": @0};
 }

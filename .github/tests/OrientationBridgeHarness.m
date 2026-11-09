@@ -630,6 +630,15 @@ static void explicitScenario(NSString *scenario) {
     }
     if ([scenario isEqual:@"v2-non-key"]) f.window.isKeyWindow = NO;
     if ([scenario isEqual:@"v2-floating"]) f.guest.isMaximized = NO;
+    if ([scenario isEqual:@"v2-restore-landscape"]) {
+        setGeometry(f, YES);
+        [f.guest appSceneVC:f.guest.appSceneVC didRequestInterfaceOrientations:UIInterfaceOrientationMaskLandscape fullscreen:YES reply:reply];
+        require([result[@"applied"] boolValue], @"Already-landscape entry failed");
+        [f.host requestInterfaceOrientations:UIInterfaceOrientationMaskPortrait forController:f.guest fullscreen:NO reply:reply];
+        require(replies == 2 && [result[@"applied"] boolValue] && !f.host.orientationOwner, @"Exit did not restore original landscape");
+        require(f.window.windowScene.requests.lastObject.unsignedIntegerValue == UIInterfaceOrientationMaskLandscapeLeft, @"Guest portrait default replaced original host direction");
+        return;
+    }
     [f.guest appSceneVC:f.guest.appSceneVC didRequestInterfaceOrientations:UIInterfaceOrientationMaskLandscape fullscreen:YES reply:reply];
     require(!result && f.host.orientationOwner == f.guest, @"Request reported success before host and guest geometry changed");
     if ([scenario isEqual:@"v2-timeout"]) {

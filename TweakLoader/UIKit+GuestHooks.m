@@ -99,7 +99,9 @@ static NSXPCConnection *LCGetGuestOrientationConnection(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         LCOrientationReply finish = LCOrientationReplyOnce(completion);
         if (!LCGuestOrientationEndpoint || LCGuestOrientationVersion < LCOrientationBridgeVersion) {
-            finish(LCOrientationFailure(@"unsupported", NO));
+            NSMutableDictionary *state = [LCOrientationFailure(@"unsupported", NO) mutableCopy];
+            state[@"container"] = @(LCGuestOrientationEndpoint != nil);
+            finish(state);
             return;
         }
         // This is an explicit action from the guest in the authenticated XPC

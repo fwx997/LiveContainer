@@ -134,7 +134,7 @@ class OrientationBridgeTests(unittest.TestCase):
         self.run_scenario("guest-routing")
 
     def test_explicit_fullscreen_reports_actual_geometry_and_releases(self):
-        for scenario in ["v2-non-key", "v2-floating", "v2-release", "v2-denials", "v2-timeout", "v2-stale", "v2-once"]:
+        for scenario in ["v2-non-key", "v2-floating", "v2-release", "v2-restore-landscape", "v2-denials", "v2-timeout", "v2-stale", "v2-once"]:
             with self.subTest(scenario=scenario):
                 self.run_scenario(scenario)
 
