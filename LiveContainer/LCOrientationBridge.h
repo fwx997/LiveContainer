@@ -5,6 +5,7 @@
 static NSString * const LCOrientationEndpointKey = @"LCOrientationEndpoint";
 static NSString * const LCOrientationBridgeVersionKey = @"LCOrientationBridgeVersion";
 static NSString * const LCContainerPlaybackVersionKey = @"LCContainerPlaybackVersion";
+static NSString * const LCContainerMediaVersionKey = @"LCContainerMediaVersion";
 static NSString * const LCContainerPlaybackStateDidChange = @"LCContainerPlaybackStateDidChange";
 static const NSUInteger LCOrientationBridgeVersion = 2;
 
@@ -37,4 +38,5 @@ static inline NSDictionary *LCOrientationFailure(NSString *reason, BOOL supporte
                           fullscreen:(BOOL)fullscreen
                               reply:(LCOrientationReply)reply;
 - (void)observeContainerPlaybackState;
+- (void)updateContainerMediaPlayback:(NSDictionary *)descriptor;
 @end

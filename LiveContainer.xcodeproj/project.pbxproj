@@ -270,6 +270,8 @@
 				MultitaskManager.swift,
 				PiPManager.h,
 				PiPManager.m,
+				LCMediaPiPController.h,
+				LCMediaPiPController.m,
 				ResizeHandleView.h,
 				ResizeHandleView.m,
 				UIKitHooks.m,

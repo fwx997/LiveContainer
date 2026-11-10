@@ -18,5 +18,6 @@ API_AVAILABLE(ios(16.0))
 - (BOOL)isPiPWithDecoratedVC:(UIViewController*)vc;
 - (void)stopPiP;
 - (void)startPiPWithVC:(AppSceneViewController*)vc;
+- (void)containerMediaPlaybackDidChangeForVC:(AppSceneViewController *)vc;
 
 @end

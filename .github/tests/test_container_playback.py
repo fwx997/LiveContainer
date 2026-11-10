@@ -16,13 +16,17 @@ def production_harness():
     harness = Path(__file__).with_name("ContainerPlaybackHarness.m").read_text(encoding="utf-8")
     groups = {
         "RECEIVER": (scene, ["- (void)observeContainerPlaybackState", "- (void)hostActivityChanged:", "- (void)publishPlaybackState {"]),
-        "SCENE": (scene, ["- (void)setContainerPictureInPictureActive:"]),
+        "SCENE": (scene, ["- (void)setContainerPictureInPictureActive:", "- (void)setContainerMediaPlaybackState:"]),
         "PIP": (pip, [
+            "- (void)protectGuestSceneForPictureInPicture",
+            "- (void)restoreGuestSceneAfterPictureInPicture",
+            "- (void)stopPiP",
             "- (void)pictureInPictureControllerWillStartPictureInPicture:",
             "- (void)pictureInPictureControllerDidStartPictureInPicture:",
             "- (void)pictureInPictureControllerWillStopPictureInPicture:",
             "- (void)pictureInPictureControllerDidStopPictureInPicture:",
             "- (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStart",
+            "- (void)finishMediaPictureInPicture",
             "- (void)stopObservingBounds",
         ]),
         "GUEST": (guest, ["- (void)containerPlaybackStateDidChange:"]),
@@ -32,8 +36,19 @@ def production_harness():
     return harness
 
 
+class ContainerPlaybackHarnessTests(unittest.TestCase):
+    def test_current_production_methods_are_extractable(self):
+        harness = production_harness()
+        self.assertNotIn("// INSERT_", harness)
+        self.assertIn("native media cleanup returns the same paused session", harness)
+
+
 @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "macOS Foundation is required for production PiP lifecycle tests")
 class ContainerPlaybackTests(unittest.TestCase):
+    def test_native_media_controls_and_stale_handoffs(self):
+        from test_media_pip import run_media_harness
+        run_media_harness()
+
     def test_per_guest_lifecycle_and_stale_callbacks(self):
         with tempfile.TemporaryDirectory(prefix="lc-playback-tests-") as directory:
             source = Path(directory) / "Playback.m"

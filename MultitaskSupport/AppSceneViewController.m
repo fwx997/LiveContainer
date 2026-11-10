@@ -9,6 +9,7 @@
 #import "LiveContainerSwiftUI-Swift.h"
 #import "../LiveContainerSwiftUI/Utilities/LCUtils.h"
 #import "PiPManager.h"
+#import "LCMediaPiPController.h"
 #import "Localization.h"
 #import "LCSharedUtils.h"
 #import "utils.h"
@@ -23,6 +24,7 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic) BOOL invalidated;
 @property(nonatomic) BOOL usesExplicitOrientation;
 @property(nonatomic) BOOL observingPlayback, pictureInPictureActive, hostActive;
+@property(nonatomic, copy) NSDictionary *mediaDescriptor, *mediaState;
 - (void)publishPlaybackState;
 - (void)invalidate;
 @end
@@ -65,6 +67,9 @@ API_AVAILABLE(ios(16.0))
                 receiver.usesExplicitOrientation = NO;
             }
             AppSceneViewController *vc = receiver.sceneViewController;
+            receiver.mediaDescriptor = nil;
+            [PiPManager.shared containerMediaPlaybackDidChangeForVC:vc];
+            receiver.mediaState = nil;
             if ([vc.delegate respondsToSelector:@selector(appSceneVCOrientationConnectionDidInvalidate:)]) {
                 [vc.delegate appSceneVCOrientationConnectionDidInvalidate:vc];
             }
@@ -111,6 +116,8 @@ API_AVAILABLE(ios(16.0))
 }
 
 - (void)invalidate {
+    self.mediaDescriptor = nil;
+    [PiPManager.shared containerMediaPlaybackDidChangeForVC:self.sceneViewController];
     @synchronized (self) {
         self.invalidated = YES;
         self.observingPlayback = NO;
@@ -125,7 +132,7 @@ API_AVAILABLE(ios(16.0))
 - (void)observeContainerPlaybackState {
     NSXPCConnection *origin = NSXPCConnection.currentConnection;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.invalidated || self.connection != origin) return;
+        if (self.invalidated || !origin || self.connection != origin) return;
         self.observingPlayback = YES;
         [self publishPlaybackState];
     });
@@ -136,13 +143,34 @@ API_AVAILABLE(ios(16.0))
     [self publishPlaybackState];
 }
 
+- (void)updateContainerMediaPlayback:(NSDictionary *)descriptor {
+    NSXPCConnection *origin = NSXPCConnection.currentConnection;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.invalidated || !origin || self.connection != origin || !self.sceneViewController.isAppRunning) return;
+        NSDictionary *value = [LCMediaPiPController validatedDescriptor:descriptor];
+        if (!value) return;
+        BOOL sameSession = [value[@"session"] isEqual:self.mediaDescriptor[@"session"]];
+        if (sameSession && [value[@"revision"] longLongValue] <= [self.mediaDescriptor[@"revision"] longLongValue]) return;
+        if (![value[@"available"] boolValue] && !sameSession) return;
+        // Keep the cleared session's revision so a delayed earlier snapshot
+        // cannot resurrect a player that its page already disposed.
+        self.mediaDescriptor = value;
+        [PiPManager.shared containerMediaPlaybackDidChangeForVC:self.sceneViewController];
+    });
+}
+
 - (void)publishPlaybackState {
     if (self.invalidated || !self.observingPlayback || !self.connection) return;
-    NSDictionary *state = @{
+    NSMutableDictionary *state = [@{
         @"version": @1, @"supported": @YES, @"connected": @YES,
         @"active": @(self.pictureInPictureActive && self.sceneViewController.isAppRunning),
         @"hostActive": @(self.hostActive),
-    };
+        @"mediaSupported": @YES,
+    } mutableCopy];
+    if (self.mediaState) [state addEntriesFromDictionary:self.mediaState];
+    NSDictionary *descriptor = self.sceneViewController.containerMediaPlayback;
+    BOOL ownsMedia = [self.mediaState[@"mediaSession"] isEqual:descriptor[@"session"]];
+    state[@"mediaActive"] = @([self.mediaState[@"mediaActive"] boolValue] && ownsMedia && self.sceneViewController.isAppRunning);
     id<LCContainerPlaybackGuest> guest = [self.connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
         NSLog(@"[LCPlayback] State delivery failed: %@", error.localizedDescription);
     }];
@@ -221,6 +249,7 @@ static __weak AppSceneViewController *cellularSideStoreScene;
         userInfo[LCOrientationEndpointKey] = self.orientationReceiver.listener.endpoint;
         userInfo[LCOrientationBridgeVersionKey] = @(LCOrientationBridgeVersion);
         userInfo[LCContainerPlaybackVersionKey] = @1;
+        userInfo[LCContainerMediaVersionKey] = @1;
     }
     
     NSString* launchAppUrlScheme = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
@@ -400,6 +429,8 @@ static __weak AppSceneViewController *cellularSideStoreScene;
 }
 
 - (void)terminate {
+    self.orientationReceiver.mediaDescriptor = nil;
+    [PiPManager.shared containerMediaPlaybackDidChangeForVC:self];
     [self setContainerPictureInPictureActive:NO];
     if(self.isAppRunning) {
         [self.extension _kill:SIGTERM];
@@ -551,6 +582,17 @@ static __weak AppSceneViewController *cellularSideStoreScene;
 }
 
 - (void)setContainerPictureInPictureActive:(BOOL)active {
+    self.orientationReceiver.pictureInPictureActive = active;
+    [self.orientationReceiver publishPlaybackState];
+}
+
+- (NSDictionary *)containerMediaPlayback {
+    NSDictionary *descriptor = self.orientationReceiver.mediaDescriptor;
+    return [descriptor[@"available"] boolValue] ? descriptor : nil;
+}
+
+- (void)setContainerMediaPlaybackState:(NSDictionary *)state pictureInPictureActive:(BOOL)active {
+    self.orientationReceiver.mediaState = state;
     self.orientationReceiver.pictureInPictureActive = active;
     [self.orientationReceiver publishPlaybackState];
 }

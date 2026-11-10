@@ -22,6 +22,8 @@ BOOL launchURLProcessed = NO;
 static NSXPCListenerEndpoint *LCGuestOrientationEndpoint;
 static NSXPCConnection *LCGuestOrientationConnection;
 static BOOL LCGuestPlaybackSupported;
+static BOOL LCGuestMediaSupported;
+static NSDictionary *LCGuestMediaDescriptor;
 static NSDictionary *LCGuestPlaybackState;
 static NSUInteger LCGuestOrientationVersion;
 static BOOL LCGuestUsesExplicitOrientation;
@@ -86,11 +88,36 @@ static NSXPCConnection *LCGetGuestOrientationConnection(void) {
             dispatch_async(dispatch_get_main_queue(), ^{ LCDiscardGuestOrientationConnection(weakConnection); });
         }];
         [host observeContainerPlaybackState];
+        if (LCGuestMediaSupported && LCGuestMediaDescriptor) {
+            [host updateContainerMediaPlayback:LCGuestMediaDescriptor];
+        }
     }
     return connection;
 }
 
 @implementation UIApplication (LCContainerPlayback)
+- (NSNumber *)lc_setMediaPlaybackState:(NSDictionary *)descriptor {
+    if (!LCGuestMediaSupported || ![descriptor isKindOfClass:NSDictionary.class]) return @NO;
+    if (![descriptor[@"version"] isEqual:@1] ||
+        ![descriptor[@"session"] isKindOfClass:NSString.class] ||
+        ![descriptor[@"revision"] isKindOfClass:NSNumber.class]) return @NO;
+    NSDictionary *snapshot = [descriptor copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BOOL sameSession = [snapshot[@"session"] isEqual:LCGuestMediaDescriptor[@"session"]];
+        if (sameSession && [snapshot[@"revision"] longLongValue] <= [LCGuestMediaDescriptor[@"revision"] longLongValue]) return;
+        if (![snapshot[@"available"] isEqual:@YES] && !sameSession) return;
+        LCGuestMediaDescriptor = snapshot;
+        NSXPCConnection *connection = LCGetGuestOrientationConnection();
+        if (!connection) return;
+        __weak NSXPCConnection *weakConnection = connection;
+        id<LCOrientationHost> host = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{ LCDiscardGuestOrientationConnection(weakConnection); });
+        }];
+        [host updateContainerMediaPlayback:snapshot];
+    });
+    return @YES;
+}
+
 - (NSDictionary *)lc_containerPlaybackState {
     if (LCGuestPlaybackSupported) LCGetGuestOrientationConnection();
     return LCGuestPlaybackState ?: LCDisconnectedPlaybackState();
@@ -186,6 +213,7 @@ static void LCInitGuestOrientationBridge(void) {
         LCGuestOrientationEndpoint = endpoint;
         LCGuestOrientationVersion = [[handler retrievedAppInfo][LCOrientationBridgeVersionKey] unsignedIntegerValue];
         LCGuestPlaybackSupported = [[handler retrievedAppInfo][LCContainerPlaybackVersionKey] isEqual:@1];
+        LCGuestMediaSupported = [[handler retrievedAppInfo][LCContainerMediaVersionKey] isEqual:@1];
         if (LCGuestPlaybackSupported) {
             dispatch_async(dispatch_get_main_queue(), ^{ LCGetGuestOrientationConnection(); });
         }

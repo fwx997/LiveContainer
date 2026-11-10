@@ -65,8 +65,24 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 - (instancetype)init { self = [super init]; _view = [PlaybackView new]; return self; }
 @end
 @interface AVPictureInPictureController : NSObject
+@property BOOL isPictureInPictureActive;
+@property id delegate;
+- (void)stopPictureInPicture;
 @end
 @implementation AVPictureInPictureController
+- (void)stopPictureInPicture { self.isPictureInPictureActive = NO; }
+@end
+@interface PlaybackMediaController : NSObject
+@property NSDictionary *playbackState;
+@property BOOL started, stopping, invalidated;
+- (void)didStart;
+- (void)willStop;
+- (void)invalidate;
+@end
+@implementation PlaybackMediaController
+- (void)didStart { self.started = YES; }
+- (void)willStop { self.stopping = YES; }
+- (void)invalidate { self.invalidated = YES; }
 @end
 @interface PlaybackDecoration : NSObject
 @property BOOL minimized;
@@ -85,13 +101,17 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 @property BOOL isAppRunning, usesHostingControllerAPI, shouldIgnoreSceneUpdates, backgroundNotifications;
 @property PlaybackView *view, *contentView;
 @property LCOrientationRequestReceiver *orientationReceiver;
+@property NSDictionary *containerMediaPlayback;
+@property NSInteger backgroundEnables, backgroundDisables;
 - (void)setContainerPictureInPictureActive:(BOOL)active;
+- (void)setContainerMediaPlaybackState:(NSDictionary *)state pictureInPictureActive:(BOOL)active;
 - (void)setBackgroundNotificationEnabled:(bool)enabled;
 @end
 @interface LCOrientationRequestReceiver : NSObject
 @property BOOL invalidated, observingPlayback, pictureInPictureActive, hostActive;
 @property AppSceneViewController *sceneViewController;
 @property PlaybackConnection *connection;
+@property NSDictionary *mediaState;
 - (void)publishPlaybackState;
 @end
 @implementation LCOrientationRequestReceiver
@@ -99,7 +119,11 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 @end
 @implementation AppSceneViewController
 - (instancetype)init { self = [super init]; _view = [PlaybackView new]; _contentView = [PlaybackView new]; return self; }
-- (void)setBackgroundNotificationEnabled:(bool)enabled { self.backgroundNotifications = enabled; }
+- (void)setBackgroundNotificationEnabled:(bool)enabled {
+    self.backgroundNotifications = enabled;
+    if (enabled) ++self.backgroundEnables;
+    else ++self.backgroundDisables;
+}
 // INSERT_SCENE
 @end
 
@@ -117,6 +141,9 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 @property PlaybackView *pipVideoCallContentView;
 @property PlaybackContentController *pipVideoCallViewController;
 @property BOOL observingBounds;
+@property BOOL containerPiPActive, scenePlaybackProtected;
+@property NSUInteger startGeneration;
+@property PlaybackMediaController *mediaController;
 @end
 @implementation PiPManager
 // INSERT_PIP
@@ -179,6 +206,43 @@ int main(void) {
             require(!pip.displayingDecoratedVC.minimized && !scene.shouldIgnoreSceneUpdates, @"failed start restores window");
             require(pip.pipVideoCallViewController.view.layer.observers == 0, @"failed start releases observer");
         }
+        NSUInteger beforeNil = sink.states.count;
+        [pip pictureInPictureControllerDidStopPictureInPicture:nil];
+        require(beforeNil == sink.states.count, @"nil PiP callback cannot revoke a live session");
+        PlaybackMediaController *media = [PlaybackMediaController new];
+        media.playbackState = @{@"mediaSession": @"video", @"mediaLease": @"lease-2", @"mediaActive": @YES,
+                                @"mediaReady": @YES, @"mediaPlaying": @NO, @"mediaPosition": @120000};
+        scene.containerMediaPlayback = @{@"session": @"video", @"available": @YES};
+        pip.mediaController = media;
+        pip.pipController = [AVPictureInPictureController new];
+        pip.displayingVC = scene;
+        [scene setContainerMediaPlaybackState:media.playbackState pictureInPictureActive:NO];
+        NSInteger enableCount = scene.backgroundEnables;
+        [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
+        [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
+        [pip pictureInPictureControllerDidStartPictureInPicture:pip.pipController];
+        require(pip.containerPiPActive && media.started, @"native PiP is active during native callbacks");
+        require(pip.pipVideoCallViewController.view.layer.observers == 0, @"native media does not move the guest view or observe its bounds");
+        [pip pictureInPictureControllerWillStopPictureInPicture:pip.pipController];
+        require(media.stopping, @"native stop suppresses delayed player controls");
+        [pip pictureInPictureControllerDidStopPictureInPicture:pip.pipController];
+        require(media.invalidated && pip.mediaController == nil && !pip.containerPiPActive, @"native cleanup releases its controller");
+        require(![sink.states.lastObject[@"mediaActive"] boolValue] &&
+                ![sink.states.lastObject[@"mediaPlaying"] boolValue] &&
+                [sink.states.lastObject[@"mediaLease"] isEqual:@"lease-2"], @"native media cleanup returns the same paused session");
+        require(scene.backgroundEnables == enableCount + 1, @"duplicate willStart restores background observers only once");
+        pip.displayingVC = scene;
+        pip.pipController = [AVPictureInPictureController new];
+        pip.mediaController = [PlaybackMediaController new];
+        pip.mediaController.playbackState = media.playbackState;
+        enableCount = scene.backgroundEnables;
+        [pip stopPiP];
+        require(pip.mediaController == nil && pip.pipController == nil, @"pending native PiP can be cancelled");
+        require(scene.backgroundEnables == enableCount, @"cancel before willStart does not duplicate background observers");
+        [scene setContainerMediaPlaybackState:media.playbackState pictureInPictureActive:NO];
+        scene.containerMediaPlayback = @{@"session": @"replacement", @"available": @YES};
+        [receiver publishPlaybackState];
+        require(![sink.states.lastObject[@"mediaActive"] boolValue], @"old media session cannot retain the replacement's audio grant");
         [scene setContainerPictureInPictureActive:YES];
         scene.isAppRunning = NO;
         [receiver publishPlaybackState];

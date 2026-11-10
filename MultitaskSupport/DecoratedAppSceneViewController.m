@@ -280,7 +280,7 @@ static const CGFloat LCWindowTopBarExtension = 12;
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.alpha = 0;
     } completion:^(BOOL finished) {
-        self.view.hidden = YES;
+        if (finished && self.view.alpha < 0.01) self.view.hidden = YES;
     }];
 }
 
