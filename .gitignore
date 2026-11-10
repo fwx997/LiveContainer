@@ -7,3 +7,10 @@ packages/
 xcuserdata
 Resources/Frameworks/OpenSSL.framework
 apps_nightly.json
+
+# Python regression caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
