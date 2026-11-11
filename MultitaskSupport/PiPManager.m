@@ -215,6 +215,7 @@ static PiPManager* sharedInstance = nil;
     if (self.displayingVC.contentView) [self.displayingVC.view insertSubview:self.displayingVC.contentView atIndex:0];
     // resize if needed (eg orientation differs)
     [self.displayingDecoratedVC updateVerticalConstraints];
+    [self.displayingDecoratedVC restoreFullscreenAfterPictureInPicture];
     [self.displayingVC setContainerPictureInPictureActive:NO];
     
     self.pipVideoCallContentView.transform = CGAffineTransformIdentity;
@@ -236,6 +237,7 @@ static PiPManager* sharedInstance = nil;
     [self restoreGuestSceneAfterPictureInPicture];
     [self.displayingDecoratedVC unminimizeWindowPiP];
     [self.displayingDecoratedVC updateVerticalConstraints];
+    [self.displayingDecoratedVC restoreFullscreenAfterPictureInPicture];
     [self.displayingVC setContainerMediaPlaybackState:state pictureInPictureActive:NO];
     self.displayingVC = nil;
 }

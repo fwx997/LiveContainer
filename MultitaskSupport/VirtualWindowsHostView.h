@@ -19,4 +19,11 @@ API_AVAILABLE(ios(16.0))
                            fullscreen:(BOOL)fullscreen
                                 reply:(void (^)(NSDictionary *state))reply;
 - (void)releaseOrientationForController:(DecoratedAppSceneViewController *)controller;
+- (void)suspendOrientationForPictureInPicture:(DecoratedAppSceneViewController *)controller;
+- (void)restoreOrientationAfterPictureInPicture:(DecoratedAppSceneViewController *)controller;
+- (void)cancelPictureInPictureOrientationForController:(DecoratedAppSceneViewController *)controller;
+- (void)requestDisplayBrightness:(NSDictionary *)request
+                   forController:(DecoratedAppSceneViewController *)controller
+                           reply:(void (^)(NSDictionary *state))reply;
+- (void)releaseBrightnessForController:(DecoratedAppSceneViewController *)controller;
 @end
