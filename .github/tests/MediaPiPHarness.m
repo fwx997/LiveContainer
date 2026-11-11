@@ -196,7 +196,8 @@ static NSMutableDictionary *descriptor(NSString *session, NSUInteger revision, B
     return [@{@"version": @1, @"session": session, @"revision": @(revision), @"available": @YES,
               @"url": @"https://example.invalid/live.m3u8", @"headers": @{@"Referer": @"https://example.invalid/"},
               @"playing": @(playing), @"live": @(live), @"position": @120000, @"volume": @0.6,
-              @"refreshRequest": @(request), @"handoffReady": @NO} mutableCopy];
+              @"refreshRequest": @(request), @"handoffReady": @NO,
+              @"handoffLease": NSNull.null} mutableCopy];
 }
 static LCMediaPiPController *makeMedia(BOOL live, BOOL playing, NSUInteger request) {
     NSDictionary *value = [LCMediaPiPController validatedDescriptor:descriptor(@"channel", 1, live, playing, request)];
@@ -215,6 +216,8 @@ static void makeReady(LCMediaPiPController *media) { media.player.currentItem.st
 static void checkDescriptorValidation(void) {
     NSMutableDictionary *value = descriptor(@"channel", 1, YES, YES, 0);
     require([LCMediaPiPController validatedDescriptor:value] != nil, @"valid stream is accepted");
+    require([LCMediaPiPController validatedDescriptor:value][@"handoffLease"] == nil,
+            @"Flutter's null initial lease is absent until the native handoff starts");
     value[@"url"] = @"file:///etc/passwd";
     require([LCMediaPiPController validatedDescriptor:value] == nil, @"non-network media is rejected");
     value[@"url"] = @"http://127.0.0.1:40123/token/live.m3u8";
@@ -339,14 +342,58 @@ static void checkFiniteRenewalAndLateSeek(void) {
     [media invalidate];
 }
 
+static void checkSystemTransportControls(void) {
+    LCMediaPiPController *media = makeMedia(NO, YES, 0);
+    require(!media.controller.requiresLinearPlayback, @"finite video must allow system backward, play/pause and forward controls");
+    [media updateDescriptor:ack(media, 2, 0)];
+    makeReady(media);
+    [media didStart];
+    require(!media.controller.requiresLinearPlayback, @"preparing finite media disabled the system seek controls");
+    NSUInteger replacements = media.player.replacements;
+    __block NSUInteger seeks = 0;
+    [media.player seekToTime:CMTimeMakeWithSeconds(105, 1000) completionHandler:^(BOOL finished) {
+        require(finished, @"system backward seek was rejected");
+        ++seeks;
+    }];
+    require([media.playbackState[@"mediaPosition"] doubleValue] == 105000, @"system backward seek was not reflected in playback state");
+    [media.player pause];
+    require(!media.desiredPlaying && media.player.rate == 0, @"system pause did not pause finite playback");
+    [media.player play];
+    require(media.desiredPlaying && media.player.rate > 0 && !media.refreshing && media.refreshRequest == 0,
+            @"system play treated finite video as a live refresh");
+    [media.player seekToTime:CMTimeMakeWithSeconds(120, 1000) completionHandler:^(BOOL finished) {
+        require(finished, @"system forward seek was rejected");
+        ++seeks;
+    }];
+    require(seeks == 2 && [media.playbackState[@"mediaPosition"] doubleValue] == 120000 && media.player.replacements == replacements,
+            @"system seek controls replaced the finite player or lost its position");
+    NSMutableDictionary *live = ack(media, 3, 0);
+    live[@"live"] = @YES;
+    [media updateDescriptor:live];
+    require(media.controller.requiresLinearPlayback, @"switching to live media must disable time-shift controls");
+    [media invalidate];
+
+    media = makeMedia(YES, YES, 0);
+    require(media.controller.requiresLinearPlayback, @"live media must request linear system playback from initialization");
+    [media updateDescriptor:ack(media, 2, 0)];
+    makeReady(media);
+    require(media.controller.requiresLinearPlayback, @"ready live media lost linear playback");
+    NSMutableDictionary *finite = ack(media, 3, 0);
+    finite[@"live"] = @NO;
+    [media updateDescriptor:finite];
+    require(!media.controller.requiresLinearPlayback, @"switching to finite media left system seeking disabled");
+    [media invalidate];
+}
+
 int main(void) {
     @autoreleasepool {
         checkDescriptorValidation();
         checkLeaseAndPauseIntent();
         checkTimeoutAndBuffering();
         checkFiniteRenewalAndLateSeek();
+        checkSystemTransportControls();
         fireDeadlines();
-        NSLog(@"Native media PiP production checks passed: lease, ownership, pause, refresh, buffering, timeout, finite seek and teardown");
+        NSLog(@"Native media PiP production checks passed: lease, ownership, pause, refresh, buffering, timeout, finite seek, system transport controls and teardown");
     }
     return 0;
 }

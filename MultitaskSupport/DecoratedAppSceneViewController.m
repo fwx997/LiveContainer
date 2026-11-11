@@ -276,7 +276,9 @@ static const CGFloat LCWindowTopBarExtension = 12;
 }
 
 - (void)minimizeWindowPiP {
-    [self releaseHostOrientation];
+    if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview suspendOrientationForPictureInPicture:self];
+    }
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.alpha = 0;
     } completion:^(BOOL finished) {
@@ -288,7 +290,15 @@ static const CGFloat LCWindowTopBarExtension = 12;
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.hidden = NO;
         self.view.alpha = 1;
-    } completion:nil];
+    } completion:^(BOOL finished) {
+        [self restoreFullscreenAfterPictureInPicture];
+    }];
+}
+
+- (void)restoreFullscreenAfterPictureInPicture {
+    if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview restoreOrientationAfterPictureInPicture:self];
+    }
 }
 
 - (void)maximizeWindow {
@@ -419,8 +429,20 @@ static const CGFloat LCWindowTopBarExtension = 12;
     if (vc == self.appSceneVC) [self releaseHostOrientation];
 }
 
+- (void)appSceneVC:(AppSceneViewController *)vc
+ didRequestDisplayBrightness:(NSDictionary *)request
+                            reply:(void (^)(NSDictionary *))reply {
+    if (vc != self.appSceneVC || ![self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        reply(@{@"version": @1, @"supported": @YES, @"applied": @NO});
+        return;
+    }
+    [(VirtualWindowsHostView *)self.view.superview requestDisplayBrightness:request forController:self reply:reply];
+}
+
 - (void)releaseHostOrientation {
     if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview cancelPictureInPictureOrientationForController:self];
+        [(VirtualWindowsHostView *)self.view.superview releaseBrightnessForController:self];
         [(VirtualWindowsHostView *)self.view.superview releaseOrientationForController:self];
     }
 }

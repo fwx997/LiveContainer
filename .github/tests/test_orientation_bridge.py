@@ -1,4 +1,4 @@
-"""Run the production host orientation policy against small UIKit substitutes."""
+"""Run production orientation, PiP return and display policy with UIKit substitutes."""
 
 from pathlib import Path
 import shutil
@@ -17,6 +17,9 @@ def production_harness():
     transaction_start = host.index("@interface LCOrientationTransaction")
     transaction_end = host.index("@interface VirtualWindowsHostView", transaction_start)
     harness = harness.replace("// INSERT_TRANSACTION", host[transaction_start:transaction_end])
+    properties_start = host.index("\n", transaction_end) + 1
+    properties_end = host.index("@end", properties_start)
+    harness = harness.replace("// INSERT_HOST_PROPERTIES", host[properties_start:properties_end])
     bridge = (ROOT / "LiveContainer/LCOrientationBridge.h").read_text(encoding="utf-8")
     harness = harness.replace("// INSERT_REPLY_HELPERS", bridge[bridge.index("static const NSUInteger LCOrientationBridgeVersion"):bridge.index("@protocol LCContainerPlaybackGuest")])
     guest = (ROOT / "TweakLoader/UIKit+GuestHooks.m").read_text(encoding="utf-8")
@@ -35,6 +38,17 @@ def production_harness():
         "- (void)checkOrientationTransaction:",
         "- (void)requestInterfaceOrientations:(UIInterfaceOrientationMask)orientations\n",
         "- (void)releaseOrientationForController:",
+        "- (void)suspendOrientationForPictureInPicture:",
+        "- (void)cancelPictureInPictureOrientationForController:",
+        "- (void)adoptPictureInPictureOrientationForController:",
+        "- (void)restoreOrientationAfterPictureInPicture:",
+        "- (void)resumePictureInPictureOrientation",
+        "- (void)hostWillDeactivate:",
+        "- (void)restoreDisplayBrightness",
+        "- (void)releaseBrightnessForController:",
+        "- (void)validateBrightnessOwner",
+        "- (NSDictionary *)brightnessState:",
+        "- (void)requestDisplayBrightness:",
         "- (void)restoreHostOrientationIfNeeded",
         "- (void)validateOrientationOwner",
         "- (void)bringSubviewToFront:",
@@ -47,11 +61,14 @@ def production_harness():
     decorated_signatures = [
         "- (void)releaseHostOrientation",
         "- (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:",
-        "- (void)appSceneVC:(AppSceneViewController *)vc\n",
+        "- (void)appSceneVC:(AppSceneViewController *)vc\n didRequestInterfaceOrientations:",
+        "- (void)appSceneVC:(AppSceneViewController *)vc\n didRequestDisplayBrightness:",
         "- (void)appSceneVCOrientationConnectionDidInvalidate:",
         "- (void)closeWindow",
         "- (void)minimizeWindow {",
         "- (void)minimizeWindowPiP",
+        "- (void)unminimizeWindowPiP",
+        "- (void)restoreFullscreenAfterPictureInPicture",
         "- (void)maximizeWindow",
         "- (void)appSceneVCAppDidExit:",
     ]
@@ -63,6 +80,11 @@ def production_harness():
         "// INSERT_PRODUCTION_DECORATED_METHODS",
         "\n\n".join(production_method(decorated, signature) for signature in decorated_signatures),
     )
+
+
+class OrientationHarnessAssemblyTests(unittest.TestCase):
+    def test_current_production_policy_is_fully_spliced_before_platform_skip(self):
+        self.assertNotIn("// INSERT_", production_harness())
 
 
 @unittest.skipUnless(
@@ -139,6 +161,41 @@ class OrientationBridgeTests(unittest.TestCase):
         for scenario in ["v2-non-key", "v2-floating", "v2-release", "v2-restore-landscape", "v2-denials", "v2-timeout", "v2-stale", "v2-once", "v2-automatic-resume"]:
             with self.subTest(scenario=scenario):
                 self.run_scenario(scenario)
+
+    def test_display_brightness_reads_clamps_and_restores_the_host_screen(self):
+        for scenario in ["roundtrip", "validation", "routing", "ownership", "screen-transfer"]:
+            with self.subTest(scenario=scenario):
+                self.run_scenario("brightness-" + scenario)
+
+    def test_ineligible_guests_cannot_change_display_brightness(self):
+        scenarios = [
+            "background", "inactive-scene", "inactive-app", "hidden", "transparent",
+            "host-hidden", "host-transparent", "detached-host", "terminated", "pip",
+            "covered", "modal", "detached", "other-window", "window-hidden", "missing-screen",
+        ]
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                self.run_scenario("brightness-reject-" + scenario)
+
+    def test_background_and_visibility_changes_restore_display_brightness(self):
+        for scenario in ["deactivate", "background-layout", "covered-layout", "hidden-layout", "remove"]:
+            with self.subTest(scenario=scenario):
+                self.run_scenario("brightness-lifecycle-" + scenario)
+
+    def test_pip_return_waits_for_foreground_visibility_and_actual_geometry(self):
+        for scenario in ["inactive", "active-before-stop", "hidden", "ignored", "guest-geometry", "original-direction"]:
+            with self.subTest(scenario=scenario):
+                self.run_scenario("pip-return-" + scenario)
+
+    def test_pip_geometry_failure_preserves_fullscreen_snapshot_for_retry(self):
+        for scenario in ["rejection", "timeout"]:
+            with self.subTest(scenario=scenario):
+                self.run_scenario("pip-retry-" + scenario)
+
+    def test_old_pip_transactions_cannot_clear_a_new_owner(self):
+        for scenario in ["takeover", "stale-error", "cancelled", "removed", "exit-during-restore"]:
+            with self.subTest(scenario=scenario):
+                self.run_scenario("pip-owner-" + scenario)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,14 @@ BOOL LCActivatePictureInPictureAudio(void) {
 
 + (NSDictionary *)validatedDescriptor:(NSDictionary *)value {
     if (![value isKindOfClass:NSDictionary.class] || ![value[@"version"] isEqual:@1]) return nil;
+    // Flutter's StandardMessageCodec uses NSNull for absent optional values.
+    // In particular, there cannot be a handoff lease before a host owns PiP.
+    NSMutableDictionary *fields = [value mutableCopy];
+    for (NSString *key in @[@"headers", @"position", @"volume", @"refreshRequest",
+                            @"playing", @"live", @"handoffReady", @"refreshFailed", @"handoffLease"]) {
+        if (fields[key] == NSNull.null) [fields removeObjectForKey:key];
+    }
+    value = fields;
     NSString *session = value[@"session"];
     NSNumber *revision = value[@"revision"];
     if (![session isKindOfClass:NSString.class] || session.length == 0 || session.length > 128) return nil;
