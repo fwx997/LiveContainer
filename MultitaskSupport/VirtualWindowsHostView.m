@@ -8,6 +8,7 @@
 #import "VirtualWindowsHostView.h"
 #import "../LiveContainer/LCOrientationBridge.h"
 #import <QuartzCore/QuartzCore.h>
+#include <math.h>
 
 @interface LCOrientationTransaction : NSObject
 @property(nonatomic, weak) DecoratedAppSceneViewController *controller;
@@ -15,6 +16,7 @@
 @property(nonatomic) NSUInteger generation;
 @property(nonatomic) UIInterfaceOrientationMask orientations;
 @property(nonatomic) BOOL completed, restoreFloatingWindow;
+@property(nonatomic) BOOL restoringPictureInPicture;
 @property(nonatomic) CFTimeInterval deadline;
 @end
 @implementation LCOrientationTransaction
@@ -26,6 +28,13 @@
 @property(nonatomic) UIInterfaceOrientationMask restorationOrientations;
 @property(nonatomic) NSUInteger orientationGeneration;
 @property(nonatomic, weak) DecoratedAppSceneViewController *fullscreenMaximizedController;
+@property(nonatomic, weak) DecoratedAppSceneViewController *suspendedOrientationOwner;
+@property(nonatomic, copy) NSDictionary *suspendedFullscreenState;
+@property(nonatomic) BOOL pictureInPictureRestorationPending;
+@property(nonatomic) NSUInteger pictureInPictureRestorationAttempts;
+@property(nonatomic, weak) DecoratedAppSceneViewController *brightnessOwner;
+@property(nonatomic, weak) UIScreen *adjustedScreen;
+@property(nonatomic) CGFloat originalBrightness;
 @end
 
 @implementation VirtualWindowsHostView
@@ -35,12 +44,14 @@
     self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.shouldForwardTapAction = YES;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(hostSceneDidActivate:) name:UISceneDidActivateNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(hostWillDeactivate:) name:UIApplicationWillResignActiveNotification object:nil];
     return self;
 }
 - (void)hostSceneDidActivate:(NSNotification *)notification {
     if (notification.object == self.window.windowScene) {
         [self validateOrientationOwner];
         [self restoreHostOrientationIfNeeded];
+        [self resumePictureInPictureOrientation];
         [self setNeedsLayout];
     }
 }
@@ -51,6 +62,8 @@
 - (void)layoutSubviews {
     [super layoutSubviews];
     [self validateOrientationOwner];
+    [self validateBrightnessOwner];
+    [self resumePictureInPictureOrientation];
     [self restoreHostOrientationIfNeeded];
     for (UIView *view in self.subviews) {
         DecoratedAppSceneViewController *controller = (id)view._viewDelegate;
@@ -131,6 +144,9 @@
 - (void)finishOrientationTransaction:(LCOrientationTransaction *)request applied:(BOOL)applied reason:(NSString *)reason {
     if (request.completed) return;
     request.completed = YES;
+    if (applied && request.restoringPictureInPicture) {
+        [self cancelPictureInPictureOrientationForController:request.controller];
+    }
     request.reply([self orientationStateForController:request.controller accepted:YES applied:applied reason:reason]);
 }
 
@@ -143,12 +159,18 @@
         self.requestedOrientations = 0;
         ++self.orientationGeneration;
         [self.window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
-        [self restoreHostOrientationIfNeeded];
-        if (restoreFloatingWindow && request.controller.isMaximized) {
+        if (!request.restoringPictureInPicture) [self restoreHostOrientationIfNeeded];
+        if (!request.restoringPictureInPicture && restoreFloatingWindow && request.controller.isMaximized) {
             [UIView performWithoutAnimation:^{ [request.controller maximizeWindow]; }];
         }
     }
     [self finishOrientationTransaction:request applied:NO reason:reason];
+    if (request.restoringPictureInPicture && self.pictureInPictureRestorationPending) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [weakSelf resumePictureInPictureOrientation];
+        });
+    }
 }
 
 - (void)checkOrientationTransaction:(LCOrientationTransaction *)request {
@@ -206,7 +228,9 @@
         finish(LCOrientationFailure(@"unsupported_orientation", YES));
         return;
     }
+    if (!fullscreen) [self cancelPictureInPictureOrientationForController:controller];
     if (!fullscreen && self.orientationOwner != controller) {
+        [self restoreHostOrientationIfNeeded];
         finish([self orientationStateForController:controller accepted:NO applied:NO reason:@"not_orientation_owner"]);
         return;
     }
@@ -216,10 +240,12 @@
         finish([self orientationStateForController:controller accepted:NO applied:NO reason:rejection]);
         return;
     }
+    if (fullscreen) [self adoptPictureInPictureOrientationForController:controller];
     // Returning from fullscreen restores the actual entry direction, which may
     // already have been landscape. A guest's portrait default must not replace it.
     if (!fullscreen && self.restorationOrientations) orientations = self.restorationOrientations;
     LCOrientationTransaction *request = [LCOrientationTransaction new];
+    request.restoringPictureInPicture = fullscreen && self.suspendedOrientationOwner == controller;
     request.controller = controller;
     request.reply = finish;
     request.orientations = orientations;
@@ -296,8 +322,131 @@
     [self restoreHostOrientationIfNeeded];
 }
 
+- (void)captureOrientationForPictureInPicture:(DecoratedAppSceneViewController *)controller {
+    if (self.suspendedOrientationOwner == controller && self.suspendedFullscreenState) return;
+    if (self.orientationOwner == controller && self.requestedOrientations) {
+        self.suspendedOrientationOwner = controller;
+        self.suspendedFullscreenState = @{
+            @"orientations": @(self.requestedOrientations),
+            @"restoration": @(self.restorationOrientations),
+            @"floating": @(self.fullscreenMaximizedController == controller),
+        };
+        self.pictureInPictureRestorationPending = NO;
+        self.pictureInPictureRestorationAttempts = 0;
+    }
+}
+
+- (void)suspendOrientationForPictureInPicture:(DecoratedAppSceneViewController *)controller {
+    [self captureOrientationForPictureInPicture:controller];
+    [self releaseBrightnessForController:controller];
+    [self releaseOrientationForController:controller];
+}
+
+- (void)cancelPictureInPictureOrientationForController:(DecoratedAppSceneViewController *)controller {
+    if (self.suspendedOrientationOwner != controller) return;
+    self.suspendedOrientationOwner = nil;
+    self.suspendedFullscreenState = nil;
+    self.pictureInPictureRestorationPending = NO;
+    self.pictureInPictureRestorationAttempts = 0;
+}
+
+- (void)adoptPictureInPictureOrientationForController:(DecoratedAppSceneViewController *)controller {
+    if (self.suspendedOrientationOwner != controller) return;
+    // Keep the direction from before fullscreen, not the portrait host used
+    // while the video was in PiP. A later explicit exit still restores it.
+    self.restorationOrientations = [self.suspendedFullscreenState[@"restoration"] unsignedIntegerValue];
+    if ([self.suspendedFullscreenState[@"floating"] boolValue]) self.fullscreenMaximizedController = controller;
+    // Keep this snapshot until geometry is confirmed. A rejected first request
+    // must not lose either fullscreen intent or the original exit direction.
+    self.pictureInPictureRestorationPending = YES;
+}
+
+- (void)restoreOrientationAfterPictureInPicture:(DecoratedAppSceneViewController *)controller {
+    if (self.suspendedOrientationOwner != controller) return;
+    self.pictureInPictureRestorationPending = YES;
+    [self resumePictureInPictureOrientation];
+}
+
+- (void)resumePictureInPictureOrientation {
+    if (!self.pictureInPictureRestorationPending) return;
+    DecoratedAppSceneViewController *controller = self.suspendedOrientationOwner;
+    if (!controller.appSceneVC.isAppRunning || controller.view.superview != self ||
+        (self.orientationOwner && self.orientationOwner != controller)) {
+        [self cancelPictureInPictureOrientationForController:controller];
+        return;
+    }
+    if (self.orientationOwner == controller || self.pictureInPictureRestorationAttempts >= 6) return;
+    // PiP stop and host activation arrive in either order. Layout/activation
+    // retries only after the actual guest window is visible and foreground.
+    if ([self fullscreenRejectionForController:controller]) return;
+    ++self.pictureInPictureRestorationAttempts;
+    UIInterfaceOrientationMask orientations = [self.suspendedFullscreenState[@"orientations"] unsignedIntegerValue];
+    [self requestInterfaceOrientations:orientations forController:controller fullscreen:YES reply:^(NSDictionary *state) {
+        if (![state[@"applied"] boolValue]) NSLog(@"[LCOrientation] PiP return pending: %@", state[@"reason"]);
+    }];
+}
+
+- (void)hostWillDeactivate:(NSNotification *)notification {
+    [self restoreDisplayBrightness];
+}
+
+- (void)restoreDisplayBrightness {
+    self.adjustedScreen.brightness = self.originalBrightness;
+    self.adjustedScreen = nil;
+    self.brightnessOwner = nil;
+}
+
+- (void)releaseBrightnessForController:(DecoratedAppSceneViewController *)controller {
+    if (self.brightnessOwner == controller) [self restoreDisplayBrightness];
+}
+
+- (void)validateBrightnessOwner {
+    if (self.adjustedScreen && [self fullscreenRejectionForController:self.brightnessOwner]) {
+        [self restoreDisplayBrightness];
+    }
+}
+
+- (NSDictionary *)brightnessState:(BOOL)applied {
+    UIScreen *screen = self.window.screen;
+    return @{@"version": @1, @"supported": @YES, @"applied": @(applied),
+             @"value": screen ? @(screen.brightness) : NSNull.null};
+}
+
+- (void)requestDisplayBrightness:(NSDictionary *)request
+                   forController:(DecoratedAppSceneViewController *)controller
+                           reply:(void (^)(NSDictionary *))reply {
+    if (![request isKindOfClass:NSDictionary.class] || ![request[@"version"] isEqual:@1]) {
+        reply([self brightnessState:NO]);
+        return;
+    }
+    NSString *action = request[@"action"];
+    if ([action isEqual:@"restore"]) {
+        [self releaseBrightnessForController:controller];
+        reply([self brightnessState:YES]);
+        return;
+    }
+    UIScreen *screen = self.window.screen;
+    if (!screen || controller.view.superview != self) { reply([self brightnessState:NO]); return; }
+    if ([action isEqual:@"get"]) { reply([self brightnessState:YES]); return; }
+    NSNumber *value = request[@"value"];
+    if (![action isEqual:@"set"] || ![value isKindOfClass:NSNumber.class] ||
+        !isfinite(value.doubleValue) || [self fullscreenRejectionForController:controller]) {
+        reply([self brightnessState:NO]);
+        return;
+    }
+    if (self.brightnessOwner != controller || self.adjustedScreen != screen) {
+        [self restoreDisplayBrightness];
+        self.brightnessOwner = controller;
+        self.adjustedScreen = screen;
+        self.originalBrightness = screen.brightness;
+    }
+    CGFloat level = MIN(1, MAX(0.05, value.doubleValue));
+    screen.brightness = level;
+    reply([self brightnessState:fabs(screen.brightness - level) <= 0.02]);
+}
+
 - (void)restoreHostOrientationIfNeeded {
-    if (self.orientationOwner || !self.restorationOrientations) return;
+    if (self.orientationOwner || self.pictureInPictureRestorationPending || !self.restorationOrientations) return;
     if (self.window.windowScene.activationState != UISceneActivationStateForegroundActive ||
         UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
     UIInterfaceOrientationMask restore = self.restorationOrientations;
@@ -330,6 +479,10 @@
 }
 
 - (void)willRemoveSubview:(UIView *)view {
+    if (view == self.suspendedOrientationOwner.view) {
+        [self cancelPictureInPictureOrientationForController:self.suspendedOrientationOwner];
+    }
+    if (view == self.brightnessOwner.view) [self restoreDisplayBrightness];
     if (view == self.orientationOwner.view) {
         [self releaseOrientationForController:self.orientationOwner];
     }

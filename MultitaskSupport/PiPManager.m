@@ -20,6 +20,9 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic) BOOL observingBounds;
 @property(nonatomic) BOOL containerPiPActive, scenePlaybackProtected;
 @property(nonatomic, strong) LCMediaPiPController *mediaController;
+@property(nonatomic, weak) AppSceneViewController *fallbackVC;
+@property(nonatomic, copy) NSString *fallbackSession;
+@property(nonatomic) BOOL startingPiP;
 @end
 
 
@@ -42,11 +45,11 @@ static PiPManager* sharedInstance = nil;
 }
 
 - (BOOL)isPiPWithVC:(AppSceneViewController*)vc {
-    return (self.pipController.isPictureInPictureActive || self.mediaController != nil) && self.displayingVC == vc;
+    return (self.pipController.isPictureInPictureActive || self.startingPiP || self.mediaController != nil) && self.displayingVC == vc;
 }
 
 - (BOOL)isPiPWithDecoratedVC:(UIViewController*)vc {
-    return (self.pipController.isPictureInPictureActive || self.mediaController != nil) && self.displayingDecoratedVC == vc;
+    return (self.pipController.isPictureInPictureActive || self.startingPiP || self.mediaController != nil) && self.displayingDecoratedVC == vc;
 }
 
 - (instancetype)init {
@@ -69,8 +72,20 @@ static PiPManager* sharedInstance = nil;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(replacingActivePiP * 0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (generation != self.startGeneration || !vc.isAppRunning || !vc.view.window || !vc.view.superview) return;
         self.displayingVC = vc;
+        self.startingPiP = YES;
+        [self.displayingDecoratedVC setPictureInPicturePreparing:YES];
         NSDictionary *media = vc.containerMediaPlayback;
-        if (media && [self startMediaPictureInPictureWithVC:vc descriptor:media]) return;
+        BOOL useWindow = self.fallbackVC == vc && [self.fallbackSession isEqual:media[@"session"]];
+        if (media && !useWindow && [self startMediaPictureInPictureWithVC:vc descriptor:media]) return;
+        [self startWindowPictureInPictureWithVC:vc generation:generation];
+    });
+}
+
+- (void)startWindowPictureInPictureWithVC:(AppSceneViewController *)vc generation:(NSUInteger)generation {
+        if (generation != self.startGeneration || !vc.isAppRunning || !vc.view.window) return;
+        self.displayingVC = vc;
+        self.startingPiP = YES;
+        [self.displayingDecoratedVC setPictureInPicturePreparing:YES];
         LCActivatePictureInPictureAudio();
         self.pipVideoCallViewController = [AVPictureInPictureVideoCallViewController new];
         self.pipVideoCallViewController.preferredContentSize = vc.view.bounds.size;
@@ -89,11 +104,15 @@ static PiPManager* sharedInstance = nil;
         self.pipController.delegate = self;
         [self.pipController setValue:@1 forKey:@"controlsStyle"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (generation != self.startGeneration || !vc.isAppRunning) return;
+            if (generation != self.startGeneration || !self.startingPiP || !vc.isAppRunning) return;
             [self.pipController startPictureInPicture];
         });
-    });
-
+        AVPictureInPictureController *controller = self.pipController;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            if (generation != self.startGeneration || controller != self.pipController || !self.startingPiP) return;
+            NSError *error = [NSError errorWithDomain:@"LCPiP" code:2 userInfo:nil];
+            [self pictureInPictureController:controller failedToStartPictureInPictureWithError:error];
+        });
 }
 
 - (BOOL)startMediaPictureInPictureWithVC:(AppSceneViewController *)vc descriptor:(NSDictionary *)descriptor {
@@ -139,6 +158,8 @@ static PiPManager* sharedInstance = nil;
 
 - (void)stopPiP {
     ++self.startGeneration;
+    self.startingPiP = NO;
+    [self.displayingDecoratedVC setPictureInPicturePreparing:NO];
     AVPictureInPictureController *controller = self.pipController;
     BOOL wasActive = controller.isPictureInPictureActive;
     [controller stopPictureInPicture];
@@ -166,11 +187,16 @@ static PiPManager* sharedInstance = nil;
 // PIP delegate
 - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
     if (!pictureInPictureController || pictureInPictureController != self.pipController) return;
+    // AVKit still uses the inline player layer during its start animation.
+    // Preserve its orientation now, but hide a media window only after DidStart.
+    [self.displayingDecoratedVC prepareWindowForPictureInPicture];
+    if (self.mediaController) return;
+    // Save the fullscreen direction before publishing PiP or ignoring scene
+    // updates can cause host layout to invalidate the orientation owner.
+    [self.displayingDecoratedVC minimizeWindowPiP];
     self.containerPiPActive = YES;
     [self.displayingVC setContainerPictureInPictureActive:YES];
     [self protectGuestSceneForPictureInPicture];
-    [self.displayingDecoratedVC minimizeWindowPiP];
-    if (self.mediaController) return;
     if(self.displayingVC.usesHostingControllerAPI) {
         self.pipVideoCallContentView.frame = CGRectMake(0, 0, self.displayingVC.view.bounds.size.width, self.displayingVC.view.bounds.size.height);
         self.pipVideoCallViewController.additionalSafeAreaInsets = self.displayingVC.view.safeAreaInsets;
@@ -191,8 +217,18 @@ static PiPManager* sharedInstance = nil;
 
 - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
     if (!pictureInPictureController || pictureInPictureController != self.pipController) return;
+    self.startingPiP = NO;
+    [self.displayingDecoratedVC setPictureInPicturePreparing:NO];
+    if (self.mediaController) {
+        [self.displayingDecoratedVC minimizeWindowPiP];
+        [self protectGuestSceneForPictureInPicture];
+    }
     self.containerPiPActive = YES;
     [self.mediaController didStart];
+    if (self.mediaController) {
+        [self.displayingVC setContainerMediaPlaybackState:self.mediaController.playbackState pictureInPictureActive:YES];
+        return;
+    }
     [self.displayingVC setContainerPictureInPictureActive:YES];
 }
 
@@ -205,6 +241,8 @@ static PiPManager* sharedInstance = nil;
 
 - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
     if (!pictureInPictureController || pictureInPictureController != self.pipController) return;
+    self.startingPiP = NO;
+    [self.displayingDecoratedVC setPictureInPicturePreparing:NO];
     if (self.mediaController) {
         [self finishMediaPictureInPicture];
         return;
@@ -215,6 +253,7 @@ static PiPManager* sharedInstance = nil;
     if (self.displayingVC.contentView) [self.displayingVC.view insertSubview:self.displayingVC.contentView atIndex:0];
     // resize if needed (eg orientation differs)
     [self.displayingDecoratedVC updateVerticalConstraints];
+    [self.displayingDecoratedVC restoreFullscreenAfterPictureInPicture];
     [self.displayingVC setContainerPictureInPictureActive:NO];
     
     self.pipVideoCallContentView.transform = CGAffineTransformIdentity;
@@ -226,16 +265,25 @@ static PiPManager* sharedInstance = nil;
 }
 
 - (void)finishMediaPictureInPicture {
+    [self finishMediaPictureInPictureWithError:nil];
+}
+
+- (void)finishMediaPictureInPictureWithError:(NSString *)error {
     if (!self.mediaController) return;
     NSMutableDictionary *state = [self.mediaController.playbackState mutableCopy];
+    if (error.length && ![state[@"mediaError"] length]) state[@"mediaError"] = error;
+    state[@"mediaFallback"] = @(error.length > 0);
     state[@"mediaActive"] = @NO;
     self.containerPiPActive = NO;
     [self.mediaController invalidate];
     self.mediaController = nil;
     self.pipController = nil;
     [self restoreGuestSceneAfterPictureInPicture];
+    self.startingPiP = NO;
+    [self.displayingDecoratedVC setPictureInPicturePreparing:NO];
     [self.displayingDecoratedVC unminimizeWindowPiP];
     [self.displayingDecoratedVC updateVerticalConstraints];
+    [self.displayingDecoratedVC restoreFullscreenAfterPictureInPicture];
     [self.displayingVC setContainerMediaPlaybackState:state pictureInPictureActive:NO];
     self.displayingVC = nil;
 }
@@ -255,8 +303,24 @@ static PiPManager* sharedInstance = nil;
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStartPictureInPictureWithError:(NSError *)error {
     if (!pictureInPictureController || pictureInPictureController != self.pipController) return;
+    if (self.mediaController) {
+        AppSceneViewController *vc = self.displayingVC;
+        NSUInteger generation = self.startGeneration;
+        self.fallbackVC = vc;
+        self.fallbackSession = self.mediaController.sessionIdentifier;
+        [self finishMediaPictureInPictureWithError:@"media_system_failed"];
+        NSLog(@"[LCPiP] Start failed (%@, %ld)", error.domain, (long)error.code);
+        // Preserve the original working window PiP when a second AVPlayer
+        // cannot load this source or AVKit refuses its inline player layer.
+        // The released media lease resumes the existing guest player first.
+        [self startWindowPictureInPictureWithVC:vc generation:generation];
+        return;
+    }
     [self.displayingDecoratedVC unminimizeWindowPiP];
     [self pictureInPictureControllerDidStopPictureInPicture:pictureInPictureController];
+    pictureInPictureController.delegate = nil;
+    if (self.pipController == pictureInPictureController) self.pipController = nil;
+    [self.displayingDecoratedVC showPictureInPictureError];
     NSLog(@"[LCPiP] Start failed (%@, %ld)", error.domain, (long)error.code);
 }
 

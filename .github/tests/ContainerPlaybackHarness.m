@@ -74,6 +74,7 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 @end
 @interface PlaybackMediaController : NSObject
 @property NSDictionary *playbackState;
+@property NSString *sessionIdentifier;
 @property BOOL started, stopping, invalidated;
 - (void)didStart;
 - (void)willStop;
@@ -85,15 +86,25 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 - (void)invalidate { self.invalidated = YES; }
 @end
 @interface PlaybackDecoration : NSObject
-@property BOOL minimized;
+@property BOOL minimized, prepared;
+@property BOOL preparingPiP;
+@property NSUInteger errors;
+- (void)setPictureInPicturePreparing:(BOOL)preparing;
+- (void)showPictureInPictureError;
+- (void)prepareWindowForPictureInPicture;
 - (void)minimizeWindowPiP;
 - (void)unminimizeWindowPiP;
 - (void)updateVerticalConstraints;
+- (void)restoreFullscreenAfterPictureInPicture;
 @end
 @implementation PlaybackDecoration
+- (void)showPictureInPictureError { ++self.errors; }
+- (void)setPictureInPicturePreparing:(BOOL)preparing { self.preparingPiP = preparing; }
+- (void)prepareWindowForPictureInPicture { self.prepared = YES; }
 - (void)minimizeWindowPiP { self.minimized = YES; }
 - (void)unminimizeWindowPiP { self.minimized = NO; }
 - (void)updateVerticalConstraints {}
+- (void)restoreFullscreenAfterPictureInPicture {}
 @end
 
 @class LCOrientationRequestReceiver;
@@ -144,8 +155,18 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 @property BOOL containerPiPActive, scenePlaybackProtected;
 @property NSUInteger startGeneration;
 @property PlaybackMediaController *mediaController;
+@property BOOL startingPiP;
+@property AppSceneViewController *fallbackVC, *requestedWindowVC;
+@property NSString *fallbackSession;
+@property NSUInteger windowStarts;
 @end
 @implementation PiPManager
+- (void)startWindowPictureInPictureWithVC:(AppSceneViewController *)vc generation:(NSUInteger)generation {
+    require(generation == self.startGeneration, @"fallback must preserve its start generation");
+    self.requestedWindowVC = vc;
+    self.startingPiP = YES;
+    ++self.windowStarts;
+}
 // INSERT_PIP
 @end
 
@@ -183,10 +204,16 @@ int main(void) {
         pip.pipVideoCallViewController = [PlaybackContentController new];
         [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"LCAutoEndPiP"];
         for (NSNumber *hosting in @[@NO, @YES]) {
+            pip.pipController = [AVPictureInPictureController new];
+            pip.displayingVC = scene;
+            pip.startingPiP = YES;
+            pip.displayingDecoratedVC.preparingPiP = YES;
             scene.usesHostingControllerAPI = hosting.boolValue;
             [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
             [pip pictureInPictureControllerDidStartPictureInPicture:pip.pipController];
             require([sink.states.lastObject[@"active"] boolValue], @"PiP entered");
+            require(!pip.startingPiP && !pip.displayingDecoratedVC.preparingPiP,
+                    @"successful window PiP clears the startup indicator");
             [receiver hostActivityChanged:[NSNotification notificationWithName:@"background" object:nil]];
             require(![sink.states.lastObject[@"hostActive"] boolValue] && [sink.states.lastObject[@"active"] boolValue], @"background PiP retains grant");
             NSUInteger count = sink.states.count;
@@ -204,6 +231,8 @@ int main(void) {
             [pip pictureInPictureController:pip.pipController failedToStartPictureInPictureWithError:[NSError errorWithDomain:@"test" code:1 userInfo:nil]];
             require(![sink.states.lastObject[@"active"] boolValue], @"failed start revokes grant");
             require(!pip.displayingDecoratedVC.minimized && !scene.shouldIgnoreSceneUpdates, @"failed start restores window");
+            require(!pip.displayingDecoratedVC.preparingPiP && pip.displayingDecoratedVC.errors > 0,
+                    @"failed window PiP clears preparation and reports the final failure");
             require(pip.pipVideoCallViewController.view.layer.observers == 0, @"failed start releases observer");
         }
         NSUInteger beforeNil = sink.states.count;
@@ -220,8 +249,13 @@ int main(void) {
         NSInteger enableCount = scene.backgroundEnables;
         [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
         [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
+        require(pip.displayingDecoratedVC.prepared && !pip.displayingDecoratedVC.minimized &&
+                !scene.shouldIgnoreSceneUpdates && ![sink.states.lastObject[@"active"] boolValue],
+                @"media start animation must keep its inline source visible until DidStart");
         [pip pictureInPictureControllerDidStartPictureInPicture:pip.pipController];
         require(pip.containerPiPActive && media.started, @"native PiP is active during native callbacks");
+        require(pip.displayingDecoratedVC.minimized && scene.shouldIgnoreSceneUpdates,
+                @"successful media PiP hides and protects its guest only after DidStart");
         require(pip.pipVideoCallViewController.view.layer.observers == 0, @"native media does not move the guest view or observe its bounds");
         [pip pictureInPictureControllerWillStopPictureInPicture:pip.pipController];
         require(media.stopping, @"native stop suppresses delayed player controls");
@@ -239,6 +273,26 @@ int main(void) {
         [pip stopPiP];
         require(pip.mediaController == nil && pip.pipController == nil, @"pending native PiP can be cancelled");
         require(scene.backgroundEnables == enableCount, @"cancel before willStart does not duplicate background observers");
+        pip.displayingVC = scene;
+        pip.pipController = [AVPictureInPictureController new];
+        PlaybackMediaController *failedMedia = [PlaybackMediaController new];
+        failedMedia.playbackState = media.playbackState;
+        failedMedia.sessionIdentifier = @"video";
+        pip.mediaController = failedMedia;
+        [scene setContainerMediaPlaybackState:media.playbackState pictureInPictureActive:NO];
+        [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
+        [pip pictureInPictureController:pip.pipController failedToStartPictureInPictureWithError:
+            [NSError errorWithDomain:@"AVKitErrorDomain" code:1 userInfo:nil]];
+        require(failedMedia.invalidated && !pip.displayingDecoratedVC.minimized &&
+                ![sink.states.lastObject[@"mediaActive"] boolValue] &&
+                [sink.states.lastObject[@"mediaError"] isEqual:@"media_system_failed"],
+                @"system startup failure must release native media, restore the guest and report an error");
+        require(scene.backgroundEnables == enableCount,
+                @"failed media start must not restore observers that it never disabled");
+        require(pip.requestedWindowVC == scene && pip.windowStarts == 1 &&
+                pip.fallbackVC == scene && [pip.fallbackSession isEqual:@"video"] &&
+                [sink.states.lastObject[@"mediaFallback"] boolValue],
+                @"failed controlled PiP falls back to the original guest window and remembers the failing session");
         [scene setContainerMediaPlaybackState:media.playbackState pictureInPictureActive:NO];
         scene.containerMediaPlayback = @{@"session": @"replacement", @"available": @YES};
         [receiver publishPlaybackState];

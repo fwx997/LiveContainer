@@ -25,6 +25,9 @@ API_AVAILABLE(ios(16.0))
                        fullscreen:(BOOL)fullscreen
                             reply:(void (^)(NSDictionary *state))reply;
 - (void)appSceneVCOrientationConnectionDidInvalidate:(AppSceneViewController *)vc;
+- (void)appSceneVC:(AppSceneViewController *)vc
+ didRequestDisplayBrightness:(NSDictionary *)request
+                            reply:(void (^)(NSDictionary *state))reply;
 @end
 
 API_AVAILABLE(ios(16.0))
