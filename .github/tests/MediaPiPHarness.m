@@ -138,7 +138,6 @@ static NSString * const AVLayerVideoGravityResizeAspect = @"aspect";
 + (instancetype)playerLayerWithPlayer:(AVPlayer *)player {
     AVPlayerLayer *layer = [AVPlayerLayer new];
     layer.player = player;
-    layer.readyForDisplay = YES;
     return layer;
 }
 - (void)removeFromSuperlayer { self.removed = YES; }
@@ -167,7 +166,11 @@ static NSString * const AVLayerVideoGravityResizeAspect = @"aspect";
 @end
 @implementation UIColor
 + (instancetype)blackColor { return [UIColor new]; }
-- (CGColorRef)CGColor { return NULL; }
+- (CGColorRef)CGColor {
+    static CGColorRef black;
+    if (!black) black = CGColorCreateGenericGray(0, 1);
+    return black;
+}
 @end
 @protocol AVPictureInPictureControllerDelegate <NSObject>
 @end
@@ -182,7 +185,6 @@ static NSString * const AVLayerVideoGravityResizeAspect = @"aspect";
 @implementation AVPictureInPictureController
 - (instancetype)initWithPlayerLayer:(AVPlayerLayer *)layer {
     self = [super init];
-    _isPictureInPicturePossible = YES;
     return self;
 }
 - (void)startPictureInPicture { ++self.startCalls; }
@@ -196,7 +198,8 @@ static NSMutableDictionary *descriptor(NSString *session, NSUInteger revision, B
     return [@{@"version": @1, @"session": session, @"revision": @(revision), @"available": @YES,
               @"url": @"https://example.invalid/live.m3u8", @"headers": @{@"Referer": @"https://example.invalid/"},
               @"playing": @(playing), @"live": @(live), @"position": @120000, @"volume": @0.6,
-              @"refreshRequest": @(request), @"handoffReady": @NO} mutableCopy];
+              @"refreshRequest": @(request), @"handoffReady": @NO,
+              @"handoffLease": NSNull.null} mutableCopy];
 }
 static LCMediaPiPController *makeMedia(BOOL live, BOOL playing, NSUInteger request) {
     NSDictionary *value = [LCMediaPiPController validatedDescriptor:descriptor(@"channel", 1, live, playing, request)];
@@ -210,11 +213,65 @@ static NSMutableDictionary *ack(LCMediaPiPController *media, NSUInteger revision
     value[@"refreshRequest"] = @(request);
     return value;
 }
-static void makeReady(LCMediaPiPController *media) { media.player.currentItem.status = AVPlayerItemStatusReadyToPlay; }
+static void makeReady(LCMediaPiPController *media) {
+    media.player.currentItem.status = AVPlayerItemStatusReadyToPlay;
+    media.layer.readyForDisplay = YES;
+    media.controller.isPictureInPicturePossible = YES;
+}
+
+static void checkStartupReadinessAndCleanup(void) {
+    LCMediaPiPController *media = makeMedia(YES, YES, 0);
+    require(media.layer.backgroundColor == NULL, @"pending handoff must not cover the guest with an opaque placeholder");
+    [media start];
+    require(media.controller.startCalls == 0, @"PiP must await the guest acknowledgement");
+    [media updateDescriptor:ack(media, 2, 0)];
+    [media attemptStart];
+    require(media.controller.startCalls == 0, @"PiP must await a playable item");
+    media.player.currentItem.status = AVPlayerItemStatusReadyToPlay;
+    [media attemptStart];
+    require(media.controller.startCalls == 0, @"a playable item alone does not prove a decoded frame exists");
+    media.layer.readyForDisplay = YES;
+    [media attemptStart];
+    require(media.controller.startCalls == 0, @"a decoded frame must still await system PiP availability");
+    media.controller.isPictureInPicturePossible = YES;
+    [media attemptStart];
+    [media attemptStart];
+    require(media.controller.startCalls == 1, @"a ready media source starts the system transition only once");
+    [media didStart];
+    require(media.startTimer == nil, @"successful PiP stops its startup polling");
+    require(!media.player.currentItem.canUseNetworkResourcesForLiveStreamingWhilePaused,
+            @"paused native live playback must not keep fetching a stale stream");
+    [media invalidate];
+    require(media.player.currentItem == nil && media.layer.player == nil && media.layer.removed,
+            @"cleanup releases the buffered item and detaches the native video layer");
+
+    NSArray<NSString *> *reasons = @[@"media_handoff_timeout", @"media_loading_timeout",
+                                   @"media_frame_timeout", @"media_pip_unavailable", @"media_transition_timeout"];
+    for (NSUInteger step = 0; step < reasons.count; ++step) {
+        media = makeMedia(YES, YES, 0);
+        __block NSString *failure;
+        media.failedToStart = ^(NSError *error) { failure = error.localizedDescription; };
+        [media start];
+        if (step > 0) [media updateDescriptor:ack(media, 2, 0)];
+        if (step > 1) media.player.currentItem.status = AVPlayerItemStatusReadyToPlay;
+        if (step > 2) media.layer.readyForDisplay = YES;
+        if (step > 3) media.controller.isPictureInPicturePossible = YES;
+        [media attemptStart];
+        clockTime += 16;
+        [media attemptStart];
+        require([failure isEqual:reasons[step]] && media.startTimer == nil,
+                @"startup failure must identify the blocking stage and stop polling");
+        [media invalidate];
+        require(media.player.rate == 0 && media.player.currentItem == nil && media.layer.removed,
+                @"failed startup must release playback resources before returning to the guest");
+    }
+}
 
 static void checkDescriptorValidation(void) {
     NSMutableDictionary *value = descriptor(@"channel", 1, YES, YES, 0);
     require([LCMediaPiPController validatedDescriptor:value] != nil, @"valid stream is accepted");
+    require([LCMediaPiPController validatedDescriptor:value][@"handoffLease"] == nil,
+            @"Flutter's null initial lease is absent until the native handoff starts");
     value[@"url"] = @"file:///etc/passwd";
     require([LCMediaPiPController validatedDescriptor:value] == nil, @"non-network media is rejected");
     value[@"url"] = @"http://127.0.0.1:40123/token/live.m3u8";
@@ -339,14 +396,59 @@ static void checkFiniteRenewalAndLateSeek(void) {
     [media invalidate];
 }
 
+static void checkSystemTransportControls(void) {
+    LCMediaPiPController *media = makeMedia(NO, YES, 0);
+    require(!media.controller.requiresLinearPlayback, @"finite video must allow system backward, play/pause and forward controls");
+    [media updateDescriptor:ack(media, 2, 0)];
+    makeReady(media);
+    [media didStart];
+    require(!media.controller.requiresLinearPlayback, @"preparing finite media disabled the system seek controls");
+    NSUInteger replacements = media.player.replacements;
+    __block NSUInteger seeks = 0;
+    [media.player seekToTime:CMTimeMakeWithSeconds(105, 1000) completionHandler:^(BOOL finished) {
+        require(finished, @"system backward seek was rejected");
+        ++seeks;
+    }];
+    require([media.playbackState[@"mediaPosition"] doubleValue] == 105000, @"system backward seek was not reflected in playback state");
+    [media.player pause];
+    require(!media.desiredPlaying && media.player.rate == 0, @"system pause did not pause finite playback");
+    [media.player play];
+    require(media.desiredPlaying && media.player.rate > 0 && !media.refreshing && media.refreshRequest == 0,
+            @"system play treated finite video as a live refresh");
+    [media.player seekToTime:CMTimeMakeWithSeconds(120, 1000) completionHandler:^(BOOL finished) {
+        require(finished, @"system forward seek was rejected");
+        ++seeks;
+    }];
+    require(seeks == 2 && [media.playbackState[@"mediaPosition"] doubleValue] == 120000 && media.player.replacements == replacements,
+            @"system seek controls replaced the finite player or lost its position");
+    NSMutableDictionary *live = ack(media, 3, 0);
+    live[@"live"] = @YES;
+    [media updateDescriptor:live];
+    require(media.controller.requiresLinearPlayback, @"switching to live media must disable time-shift controls");
+    [media invalidate];
+
+    media = makeMedia(YES, YES, 0);
+    require(media.controller.requiresLinearPlayback, @"live media must request linear system playback from initialization");
+    [media updateDescriptor:ack(media, 2, 0)];
+    makeReady(media);
+    require(media.controller.requiresLinearPlayback, @"ready live media lost linear playback");
+    NSMutableDictionary *finite = ack(media, 3, 0);
+    finite[@"live"] = @NO;
+    [media updateDescriptor:finite];
+    require(!media.controller.requiresLinearPlayback, @"switching to finite media left system seeking disabled");
+    [media invalidate];
+}
+
 int main(void) {
     @autoreleasepool {
         checkDescriptorValidation();
+        checkStartupReadinessAndCleanup();
         checkLeaseAndPauseIntent();
         checkTimeoutAndBuffering();
         checkFiniteRenewalAndLateSeek();
+        checkSystemTransportControls();
         fireDeadlines();
-        NSLog(@"Native media PiP production checks passed: lease, ownership, pause, refresh, buffering, timeout, finite seek and teardown");
+        NSLog(@"Native media PiP production checks passed: lease, ownership, pause, refresh, buffering, timeout, finite seek, system transport controls and teardown");
     }
     return 0;
 }

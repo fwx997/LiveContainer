@@ -17,6 +17,8 @@ API_AVAILABLE(ios(16.0))
 - (void)maximizeWindow;
 - (void)minimizeWindowPiP;
 - (void)unminimizeWindowPiP;
+- (void)restoreFullscreenAfterPictureInPicture;
+- (void)prepareWindowForPictureInPicture;
 - (void)updateVerticalConstraints;
 - (void)updateMaximizedFrame;
 @property(nonatomic, copy) void (^pidAvailableHandler)(NSNumber *pid, NSError *error);

@@ -23,6 +23,7 @@ static NSXPCListenerEndpoint *LCGuestOrientationEndpoint;
 static NSXPCConnection *LCGuestOrientationConnection;
 static BOOL LCGuestPlaybackSupported;
 static BOOL LCGuestMediaSupported;
+static BOOL LCGuestBrightnessSupported;
 static NSDictionary *LCGuestMediaDescriptor;
 static NSDictionary *LCGuestPlaybackState;
 static NSUInteger LCGuestOrientationVersion;
@@ -123,6 +124,31 @@ static NSXPCConnection *LCGetGuestOrientationConnection(void) {
     return LCGuestPlaybackState ?: LCDisconnectedPlaybackState();
 }
 
+- (void)lc_requestDisplayBrightness:(NSDictionary *)request completion:(LCOrientationReply)completion {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LCOrientationReply finish = LCOrientationReplyOnce(completion);
+        NSDictionary *failure = @{@"version": @1, @"supported": @(LCGuestBrightnessSupported), @"applied": @NO};
+        if (!LCGuestBrightnessSupported || ![request isKindOfClass:NSDictionary.class]) {
+            finish(failure);
+            return;
+        }
+        NSXPCConnection *connection = LCGetGuestOrientationConnection();
+        if (!connection) { finish(failure); return; }
+        __weak NSXPCConnection *weakConnection = connection;
+        id<LCOrientationHost> host = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{ finish(failure); });
+        }];
+        [host requestDisplayBrightness:request reply:^(NSDictionary *state) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                finish(weakConnection && LCGuestOrientationConnection == weakConnection ? state : failure);
+            });
+        }];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            finish(failure);
+        });
+    });
+}
+
 - (void)lc_requestFullscreen:(NSNumber *)fullscreen completion:(LCOrientationReply)completion {
     dispatch_async(dispatch_get_main_queue(), ^{
         LCOrientationReply finish = LCOrientationReplyOnce(completion);
@@ -214,6 +240,7 @@ static void LCInitGuestOrientationBridge(void) {
         LCGuestOrientationVersion = [[handler retrievedAppInfo][LCOrientationBridgeVersionKey] unsignedIntegerValue];
         LCGuestPlaybackSupported = [[handler retrievedAppInfo][LCContainerPlaybackVersionKey] isEqual:@1];
         LCGuestMediaSupported = [[handler retrievedAppInfo][LCContainerMediaVersionKey] isEqual:@1];
+        LCGuestBrightnessSupported = [[handler retrievedAppInfo][LCDisplayBrightnessVersionKey] isEqual:@1];
         if (LCGuestPlaybackSupported) {
             dispatch_async(dispatch_get_main_queue(), ^{ LCGetGuestOrientationConnection(); });
         }

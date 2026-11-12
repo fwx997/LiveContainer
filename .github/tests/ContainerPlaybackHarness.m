@@ -85,15 +85,19 @@ typedef struct { CGFloat top, left, bottom, right; } UIEdgeInsets;
 - (void)invalidate { self.invalidated = YES; }
 @end
 @interface PlaybackDecoration : NSObject
-@property BOOL minimized;
+@property BOOL minimized, prepared;
+- (void)prepareWindowForPictureInPicture;
 - (void)minimizeWindowPiP;
 - (void)unminimizeWindowPiP;
 - (void)updateVerticalConstraints;
+- (void)restoreFullscreenAfterPictureInPicture;
 @end
 @implementation PlaybackDecoration
+- (void)prepareWindowForPictureInPicture { self.prepared = YES; }
 - (void)minimizeWindowPiP { self.minimized = YES; }
 - (void)unminimizeWindowPiP { self.minimized = NO; }
 - (void)updateVerticalConstraints {}
+- (void)restoreFullscreenAfterPictureInPicture {}
 @end
 
 @class LCOrientationRequestReceiver;
@@ -220,8 +224,13 @@ int main(void) {
         NSInteger enableCount = scene.backgroundEnables;
         [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
         [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
+        require(pip.displayingDecoratedVC.prepared && !pip.displayingDecoratedVC.minimized &&
+                !scene.shouldIgnoreSceneUpdates && ![sink.states.lastObject[@"active"] boolValue],
+                @"media start animation must keep its inline source visible until DidStart");
         [pip pictureInPictureControllerDidStartPictureInPicture:pip.pipController];
         require(pip.containerPiPActive && media.started, @"native PiP is active during native callbacks");
+        require(pip.displayingDecoratedVC.minimized && scene.shouldIgnoreSceneUpdates,
+                @"successful media PiP hides and protects its guest only after DidStart");
         require(pip.pipVideoCallViewController.view.layer.observers == 0, @"native media does not move the guest view or observe its bounds");
         [pip pictureInPictureControllerWillStopPictureInPicture:pip.pipController];
         require(media.stopping, @"native stop suppresses delayed player controls");
@@ -239,6 +248,21 @@ int main(void) {
         [pip stopPiP];
         require(pip.mediaController == nil && pip.pipController == nil, @"pending native PiP can be cancelled");
         require(scene.backgroundEnables == enableCount, @"cancel before willStart does not duplicate background observers");
+        pip.displayingVC = scene;
+        pip.pipController = [AVPictureInPictureController new];
+        PlaybackMediaController *failedMedia = [PlaybackMediaController new];
+        failedMedia.playbackState = media.playbackState;
+        pip.mediaController = failedMedia;
+        [scene setContainerMediaPlaybackState:media.playbackState pictureInPictureActive:NO];
+        [pip pictureInPictureControllerWillStartPictureInPicture:pip.pipController];
+        [pip pictureInPictureController:pip.pipController failedToStartPictureInPictureWithError:
+            [NSError errorWithDomain:@"AVKitErrorDomain" code:1 userInfo:nil]];
+        require(failedMedia.invalidated && !pip.displayingDecoratedVC.minimized &&
+                ![sink.states.lastObject[@"mediaActive"] boolValue] &&
+                [sink.states.lastObject[@"mediaError"] isEqual:@"media_system_failed"],
+                @"system startup failure must release native media, restore the guest and report an error");
+        require(scene.backgroundEnables == enableCount,
+                @"failed media start must not restore observers that it never disabled");
         [scene setContainerMediaPlaybackState:media.playbackState pictureInPictureActive:NO];
         scene.containerMediaPlayback = @{@"session": @"replacement", @"available": @YES};
         [receiver publishPlaybackState];

@@ -166,11 +166,16 @@ static PiPManager* sharedInstance = nil;
 // PIP delegate
 - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
     if (!pictureInPictureController || pictureInPictureController != self.pipController) return;
+    // AVKit still uses the inline player layer during its start animation.
+    // Preserve its orientation now, but hide a media window only after DidStart.
+    [self.displayingDecoratedVC prepareWindowForPictureInPicture];
+    if (self.mediaController) return;
+    // Save the fullscreen direction before publishing PiP or ignoring scene
+    // updates can cause host layout to invalidate the orientation owner.
+    [self.displayingDecoratedVC minimizeWindowPiP];
     self.containerPiPActive = YES;
     [self.displayingVC setContainerPictureInPictureActive:YES];
     [self protectGuestSceneForPictureInPicture];
-    [self.displayingDecoratedVC minimizeWindowPiP];
-    if (self.mediaController) return;
     if(self.displayingVC.usesHostingControllerAPI) {
         self.pipVideoCallContentView.frame = CGRectMake(0, 0, self.displayingVC.view.bounds.size.width, self.displayingVC.view.bounds.size.height);
         self.pipVideoCallViewController.additionalSafeAreaInsets = self.displayingVC.view.safeAreaInsets;
@@ -191,6 +196,10 @@ static PiPManager* sharedInstance = nil;
 
 - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
     if (!pictureInPictureController || pictureInPictureController != self.pipController) return;
+    if (self.mediaController) {
+        [self.displayingDecoratedVC minimizeWindowPiP];
+        [self protectGuestSceneForPictureInPicture];
+    }
     self.containerPiPActive = YES;
     [self.mediaController didStart];
     [self.displayingVC setContainerPictureInPictureActive:YES];
@@ -215,6 +224,7 @@ static PiPManager* sharedInstance = nil;
     if (self.displayingVC.contentView) [self.displayingVC.view insertSubview:self.displayingVC.contentView atIndex:0];
     // resize if needed (eg orientation differs)
     [self.displayingDecoratedVC updateVerticalConstraints];
+    [self.displayingDecoratedVC restoreFullscreenAfterPictureInPicture];
     [self.displayingVC setContainerPictureInPictureActive:NO];
     
     self.pipVideoCallContentView.transform = CGAffineTransformIdentity;
@@ -226,8 +236,13 @@ static PiPManager* sharedInstance = nil;
 }
 
 - (void)finishMediaPictureInPicture {
+    [self finishMediaPictureInPictureWithError:nil];
+}
+
+- (void)finishMediaPictureInPictureWithError:(NSString *)error {
     if (!self.mediaController) return;
     NSMutableDictionary *state = [self.mediaController.playbackState mutableCopy];
+    if (error.length && ![state[@"mediaError"] length]) state[@"mediaError"] = error;
     state[@"mediaActive"] = @NO;
     self.containerPiPActive = NO;
     [self.mediaController invalidate];
@@ -236,6 +251,7 @@ static PiPManager* sharedInstance = nil;
     [self restoreGuestSceneAfterPictureInPicture];
     [self.displayingDecoratedVC unminimizeWindowPiP];
     [self.displayingDecoratedVC updateVerticalConstraints];
+    [self.displayingDecoratedVC restoreFullscreenAfterPictureInPicture];
     [self.displayingVC setContainerMediaPlaybackState:state pictureInPictureActive:NO];
     self.displayingVC = nil;
 }
@@ -255,6 +271,11 @@ static PiPManager* sharedInstance = nil;
 
 - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController failedToStartPictureInPictureWithError:(NSError *)error {
     if (!pictureInPictureController || pictureInPictureController != self.pipController) return;
+    if (self.mediaController) {
+        [self finishMediaPictureInPictureWithError:@"media_system_failed"];
+        NSLog(@"[LCPiP] Start failed (%@, %ld)", error.domain, (long)error.code);
+        return;
+    }
     [self.displayingDecoratedVC unminimizeWindowPiP];
     [self pictureInPictureControllerDidStopPictureInPicture:pictureInPictureController];
     NSLog(@"[LCPiP] Start failed (%@, %ld)", error.domain, (long)error.code);
