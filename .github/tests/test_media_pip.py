@@ -19,7 +19,8 @@ def production_harness():
     source = (folder / "LCMediaPiPController.m").read_text(encoding="utf-8")
     source = source.replace('#import "LCMediaPiPController.h"', "")
     harness = Path(__file__).with_name("MediaPiPHarness.m").read_text(encoding="utf-8")
-    return harness.replace("// INSERT_HEADER", header).replace("// INSERT_IMPLEMENTATION", source)
+    combined = harness.replace("// INSERT_HEADER", header).replace("// INSERT_IMPLEMENTATION", source)
+    return re.sub(r"\bAVAudioSession\b", "TestAudioSession", combined)
 
 
 def run_media_harness():

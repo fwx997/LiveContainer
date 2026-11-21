@@ -151,10 +151,15 @@ enum { UIUserInterfaceIdiomPad = 1 };
 @interface VirtualWindowsHostView : UIView
 - (void)validateOrientationOwner;
 - (void)restoreHostOrientationIfNeeded;
+- (void)validateBrightnessOwner;
+- (void)resumePictureInPictureOrientation;
 @end
 @implementation VirtualWindowsHostView
 - (void)validateOrientationOwner {}
 - (void)restoreHostOrientationIfNeeded {}
+// Brightness ownership and PiP restoration have their own production harness.
+- (void)validateBrightnessOwner {}
+- (void)resumePictureInPictureOrientation {}
 // INSERT_HOST_LAYOUT
 // INSERT_HOST_ACTIVATION
 // INSERT_SAFE_AREA_CHANGE
