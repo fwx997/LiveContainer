@@ -5,8 +5,8 @@
 #import "UIKitPrivate+MultitaskSupport.h"
 #import "PiPManager.h"
 #import "VirtualWindowsHostView.h"
-#import "../LiveContainer/LCOrientationBridge.h"
-#import "../LiveContainer/Localization.h"
+#import "../../LiveContainer/LCOrientationBridge.h"
+#import "../../LiveContainer/Localization.h"
 #import "utils.h"
 
 static const CGFloat LCWindowControlBarHeight = 44;

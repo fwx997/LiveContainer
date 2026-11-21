@@ -6,7 +6,7 @@
 //
 #import "DecoratedAppSceneViewController.h"
 #import "VirtualWindowsHostView.h"
-#import "../LiveContainer/LCOrientationBridge.h"
+#import "../../LiveContainer/LCOrientationBridge.h"
 #import <QuartzCore/QuartzCore.h>
 #include <math.h>
 

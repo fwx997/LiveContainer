@@ -24,11 +24,11 @@
 |---|---|
 | `LiveContainer/LCOrientationBridge.h` | 客体全屏、播放状态及媒体描述接口 |
 | `TweakLoader/UIKit+GuestHooks.m` | 客体 UIKit hook、桥接调用和背景通知恢复 |
-| `MultitaskSupport/AppSceneViewController.m` | 宿主前台、客体连接与存活检查，方向和播放状态发布 |
-| `MultitaskSupport/VirtualWindowsHostView.m` | 虚拟窗口和方向请求协调 |
-| `MultitaskSupport/DecoratedAppSceneViewController.m` | 标题栏、最大化、退出时的窗口几何恢复 |
-| `MultitaskSupport/PiPManager.m` | 容器与视频 PiP 的生命周期、接管及清理 |
-| `MultitaskSupport/LCMediaPiPController.h/.m` | AVPlayerLayer 视频 PiP、系统播放控制、直播续址和过期回调隔离 |
+| `LiveContainerSwiftUI/MultitaskSupport/AppSceneViewController.m` | 宿主前台、客体连接与存活检查，方向和播放状态发布 |
+| `LiveContainerSwiftUI/MultitaskSupport/VirtualWindowsHostView.m` | 虚拟窗口和方向请求协调 |
+| `LiveContainerSwiftUI/MultitaskSupport/DecoratedAppSceneViewController.m` | 标题栏、最大化、退出时的窗口几何恢复 |
+| `LiveContainerSwiftUI/MultitaskSupport/PiPManager.m` | 容器与视频 PiP 的生命周期、接管及清理 |
+| `LiveContainerSwiftUI/MultitaskSupport/LCMediaPiPController.h/.m` | AVPlayerLayer 视频 PiP、系统播放控制、直播续址和过期回调隔离 |
 | `LiveContainer/Info.plist` | 宿主后台 audio、媒体 ATS 例外和本地网络配置 |
 | `.github/tests/` | 打包校验、方向、背景刷新、容器及视频 PiP 回归入口 |
 

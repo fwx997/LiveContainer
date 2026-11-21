@@ -8,7 +8,7 @@
 #include "AppSceneViewController.h"
 #include "LCMediaPiPController.h"
 #include "DecoratedAppSceneViewController.h"
-#include "../LiveContainer/utils.h"
+#include "../../LiveContainer/utils.h"
 
 API_AVAILABLE(ios(16.0))
 @interface PiPManager()

@@ -10,8 +10,8 @@ from test_background_refresh import ROOT, production_method
 
 
 def production_harness():
-    scene = (ROOT / "MultitaskSupport/AppSceneViewController.m").read_text(encoding="utf-8")
-    pip = (ROOT / "MultitaskSupport/PiPManager.m").read_text(encoding="utf-8")
+    scene = (ROOT / "LiveContainerSwiftUI/MultitaskSupport/AppSceneViewController.m").read_text(encoding="utf-8")
+    pip = (ROOT / "LiveContainerSwiftUI/MultitaskSupport/PiPManager.m").read_text(encoding="utf-8")
     guest = (ROOT / "TweakLoader/UIKit+GuestHooks.m").read_text(encoding="utf-8")
     harness = Path(__file__).with_name("ContainerPlaybackHarness.m").read_text(encoding="utf-8")
     groups = {

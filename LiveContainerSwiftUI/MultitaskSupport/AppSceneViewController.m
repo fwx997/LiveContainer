@@ -7,14 +7,14 @@
 #import "AppSceneViewController.h"
 #import "DecoratedAppSceneViewController.h"
 #import "LiveContainerSwiftUI-Swift.h"
-#import "../LiveContainerSwiftUI/Utilities/LCUtils.h"
+#import "../../LiveContainerSwiftUI/Utilities/LCUtils.h"
 #import "PiPManager.h"
 #import "LCMediaPiPController.h"
 #import "Localization.h"
 #import "LCSharedUtils.h"
 #import "utils.h"
 #import "UIKitPrivate+MultitaskSupport.h"
-#import "../LiveContainer/LCOrientationBridge.h"
+#import "../../LiveContainer/LCOrientationBridge.h"
 
 API_AVAILABLE(ios(16.0))
 @interface LCOrientationRequestReceiver : NSObject <NSXPCListenerDelegate, LCOrientationHost>

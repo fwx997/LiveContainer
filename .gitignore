@@ -14,3 +14,4 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .mypy_cache/
+Dependencies/OpenSSL.xcframework

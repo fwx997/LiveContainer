@@ -50,8 +50,8 @@ def production_method(source, signature):
 class BackgroundRefreshTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "macOS Foundation is required for the window lifecycle checks")
     def test_terminated_guest_window_controls(self):
-        decorated = (ROOT / "MultitaskSupport/DecoratedAppSceneViewController.m").read_text(encoding="utf-8")
-        host = (ROOT / "MultitaskSupport/VirtualWindowsHostView.m").read_text(encoding="utf-8")
+        decorated = (ROOT / "LiveContainerSwiftUI/MultitaskSupport/DecoratedAppSceneViewController.m").read_text(encoding="utf-8")
+        host = (ROOT / "LiveContainerSwiftUI/MultitaskSupport/VirtualWindowsHostView.m").read_text(encoding="utf-8")
         harness = Path(__file__).with_name("MultitaskWindowHarness.m").read_text(encoding="utf-8")
         metrics = re.findall(r"^static const CGFloat LCWindow\w+ = [^;]+;", decorated, flags=re.MULTILINE)
         harness = harness.replace("// INSERT_WINDOW_BAR_METRICS", "\n".join(metrics))

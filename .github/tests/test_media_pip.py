@@ -13,7 +13,7 @@ from test_background_refresh import ROOT
 
 
 def production_harness():
-    folder = ROOT / "MultitaskSupport"
+    folder = ROOT / "LiveContainerSwiftUI/MultitaskSupport"
     header = (folder / "LCMediaPiPController.h").read_text(encoding="utf-8")
     header = re.sub(r"^@import .+;$", "", header, flags=re.MULTILINE)
     source = (folder / "LCMediaPiPController.m").read_text(encoding="utf-8")

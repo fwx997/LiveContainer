@@ -11,8 +11,8 @@ from test_background_refresh import ROOT, production_method
 
 
 def production_harness():
-    host = (ROOT / "MultitaskSupport/VirtualWindowsHostView.m").read_text(encoding="utf-8")
-    decorated = (ROOT / "MultitaskSupport/DecoratedAppSceneViewController.m").read_text(encoding="utf-8")
+    host = (ROOT / "LiveContainerSwiftUI/MultitaskSupport/VirtualWindowsHostView.m").read_text(encoding="utf-8")
+    decorated = (ROOT / "LiveContainerSwiftUI/MultitaskSupport/DecoratedAppSceneViewController.m").read_text(encoding="utf-8")
     harness = Path(__file__).with_name("OrientationBridgeHarness.m").read_text(encoding="utf-8")
     transaction_start = host.index("@interface LCOrientationTransaction")
     transaction_end = host.index("@interface VirtualWindowsHostView", transaction_start)
