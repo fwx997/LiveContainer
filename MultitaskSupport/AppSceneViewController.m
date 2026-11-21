@@ -129,6 +129,21 @@ API_AVAILABLE(ios(16.0))
     }
 }
 
+- (void)requestDisplayBrightness:(NSDictionary *)request reply:(LCOrientationReply)reply {
+    NSXPCConnection *origin = NSXPCConnection.currentConnection;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        LCOrientationReply finish = LCOrientationReplyOnce(reply);
+        AppSceneViewController *vc = self.sceneViewController;
+        SEL selector = @selector(appSceneVC:didRequestDisplayBrightness:reply:);
+        if (self.invalidated || !origin || self.connection != origin ||
+            !vc.isAppRunning || ![vc.delegate respondsToSelector:selector]) {
+            finish(@{@"version": @1, @"supported": @YES, @"applied": @NO});
+            return;
+        }
+        [vc.delegate appSceneVC:vc didRequestDisplayBrightness:request reply:finish];
+    });
+}
+
 - (void)observeContainerPlaybackState {
     NSXPCConnection *origin = NSXPCConnection.currentConnection;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -250,6 +265,7 @@ static __weak AppSceneViewController *cellularSideStoreScene;
         userInfo[LCOrientationBridgeVersionKey] = @(LCOrientationBridgeVersion);
         userInfo[LCContainerPlaybackVersionKey] = @1;
         userInfo[LCContainerMediaVersionKey] = @1;
+        userInfo[LCDisplayBrightnessVersionKey] = @1;
     }
     
     NSString* launchAppUrlScheme = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];

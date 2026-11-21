@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <dispatch/dispatch.h>
+#include <math.h>
 
 // CoreGraphics can load QuartzCore on macOS; keep the test double's runtime
 // class distinct from the real CALayer while production calls remain verbatim.
@@ -75,6 +76,14 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 @end
 @implementation UIApplication
 + (instancetype)sharedApplication { static UIApplication *app; if (!app) app = [self new]; return app; }
+@end
+
+@interface UIScreen : NSObject
+@property(nonatomic) CGFloat brightness;
+@property NSUInteger writes;
+@end
+@implementation UIScreen
+- (void)setBrightness:(CGFloat)brightness { _brightness = brightness; ++_writes; }
 @end
 
 @interface UIWindowSceneGeometryPreferencesIOS : NSObject
@@ -223,6 +232,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 
 @interface UIWindow : UIView
 @property UIWindowScene *windowScene;
+@property(nonatomic, strong) UIScreen *screen;
 @property UIViewController *rootViewController;
 @property BOOL isKeyWindow;
 @end
@@ -307,10 +317,14 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 - (void)releaseHostOrientation;
 - (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations;
 - (void)appSceneVC:(AppSceneViewController *)vc didRequestInterfaceOrientations:(UIInterfaceOrientationMask)orientations fullscreen:(BOOL)fullscreen reply:(void (^)(NSDictionary *))reply;
+- (void)appSceneVC:(AppSceneViewController *)vc didRequestDisplayBrightness:(NSDictionary *)request reply:(void (^)(NSDictionary *))reply;
 - (void)appSceneVCOrientationConnectionDidInvalidate:(AppSceneViewController *)vc;
 - (void)closeWindow;
 - (void)minimizeWindow;
 - (void)minimizeWindowPiP;
+- (void)prepareWindowForPictureInPicture;
+- (void)unminimizeWindowPiP;
+- (void)restoreFullscreenAfterPictureInPicture;
 - (void)maximizeWindow;
 - (void)appSceneVCAppDidExit:(AppSceneViewController *)vc;
 - (void)updateOriginalFrame;
@@ -321,10 +335,7 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 @end
 
 @interface VirtualWindowsHostView : UIView
-@property(nonatomic, weak) DecoratedAppSceneViewController *orientationOwner;
-@property(nonatomic, weak) DecoratedAppSceneViewController *fullscreenMaximizedController;
-@property UIInterfaceOrientationMask requestedOrientations, restorationOrientations;
-@property NSUInteger orientationGeneration;
+// INSERT_HOST_PROPERTIES
 + (UIInterfaceOrientationMask)defaultInterfaceOrientations;
 + (UIInterfaceOrientationMask)supportedInterfaceOrientationsForWindow:(UIWindow *)window;
 - (DecoratedAppSceneViewController *)frontmostController;
@@ -338,6 +349,18 @@ static void runMainQueueWork(dispatch_queue_t queue, dispatch_block_t block) { b
 - (void)failOrientationTransaction:(LCOrientationTransaction *)request reason:(NSString *)reason;
 - (void)checkOrientationTransaction:(LCOrientationTransaction *)request;
 - (void)releaseOrientationForController:(DecoratedAppSceneViewController *)controller;
+- (void)suspendOrientationForPictureInPicture:(DecoratedAppSceneViewController *)controller;
+- (void)captureOrientationForPictureInPicture:(DecoratedAppSceneViewController *)controller;
+- (void)cancelPictureInPictureOrientationForController:(DecoratedAppSceneViewController *)controller;
+- (void)adoptPictureInPictureOrientationForController:(DecoratedAppSceneViewController *)controller;
+- (void)restoreOrientationAfterPictureInPicture:(DecoratedAppSceneViewController *)controller;
+- (void)resumePictureInPictureOrientation;
+- (void)hostWillDeactivate:(NSNotification *)notification;
+- (void)restoreDisplayBrightness;
+- (void)releaseBrightnessForController:(DecoratedAppSceneViewController *)controller;
+- (void)validateBrightnessOwner;
+- (NSDictionary *)brightnessState:(BOOL)applied;
+- (void)requestDisplayBrightness:(NSDictionary *)request forController:(DecoratedAppSceneViewController *)controller reply:(void (^)(NSDictionary *))reply;
 - (void)restoreHostOrientationIfNeeded;
 - (void)validateOrientationOwner;
 - (void)hostSceneDidActivate:(NSNotification *)notification;
@@ -394,6 +417,8 @@ static Fixture *fixture(void) {
     fixture.window.window = fixture.window;
     fixture.window.isKeyWindow = YES;
     fixture.window.windowScene = [UIWindowScene new];
+    fixture.window.screen = [UIScreen new];
+    fixture.window.screen.brightness = 0.4;
     fixture.window.rootViewController = [UIViewController new];
     fixture.window.rootViewController.view = [UIView new];
     fixture.window.rootViewController.view.window = fixture.window;
@@ -422,6 +447,36 @@ static void setBackground(Fixture *fixture, BOOL background) {
 }
 static void activate(Fixture *fixture, UIWindowScene *scene) {
     [fixture.host hostSceneDidActivate:[NSNotification notificationWithName:@"active" object:scene]];
+}
+
+static NSDictionary *brightnessReply(DecoratedAppSceneViewController *controller, id request) {
+    __block NSDictionary *result;
+    __block NSUInteger replies = 0;
+    [controller appSceneVC:controller.appSceneVC didRequestDisplayBrightness:request reply:^(NSDictionary *state) {
+        result = state;
+        ++replies;
+    }];
+    require(replies == 1, @"Brightness request did not finish exactly once");
+    return result;
+}
+
+static NSDictionary *brightnessAction(DecoratedAppSceneViewController *controller, NSString *action, NSNumber *value) {
+    NSMutableDictionary *request = [@{@"version": @1, @"action": action} mutableCopy];
+    if (value) request[@"value"] = value;
+    return brightnessReply(controller, request);
+}
+
+static void setDisplayBrightness(Fixture *f, CGFloat value) {
+    NSDictionary *state = brightnessAction(f.guest, @"set", @(value));
+    require([state[@"applied"] boolValue] && fabs(f.window.screen.brightness - value) < 0.000001,
+            @"Foreground guest did not change the actual host display");
+    require(f.host.brightnessOwner == f.guest && f.host.adjustedScreen == f.window.screen,
+            @"Brightness change did not retain its owner and screen");
+}
+
+static void requireBrightnessRestored(Fixture *f) {
+    require(fabs(f.window.screen.brightness - 0.4) < 0.000001 && !f.host.brightnessOwner && !f.host.adjustedScreen,
+            @"Guest lifecycle did not restore the original display brightness");
 }
 
 static void directions(void) {
@@ -455,11 +510,7 @@ static void invalidMasks(void) {
     require(!f.host.orientationOwner && !f.window.windowScene.requests.count, @"Invalid or unsupported orientation masks rotated the phone");
 }
 
-static void rejected(NSString *reason) {
-    Fixture *f = fixture();
-    DecoratedAppSceneViewController *cover;
-    UIView *otherParent;
-    UIWindow *otherWindow;
+static void makeIneligible(Fixture *f, NSString *reason) {
     if ([reason isEqual:@"background"]) setBackground(f, YES);
     else if ([reason isEqual:@"inactive-scene"]) f.window.windowScene.activationState = UISceneActivationStateForegroundInactive;
     else if ([reason isEqual:@"inactive-app"]) UIApplication.sharedApplication.applicationState = UIApplicationStateInactive;
@@ -471,15 +522,21 @@ static void rejected(NSString *reason) {
     else if ([reason isEqual:@"detached-host"]) [f.host removeFromSuperview];
     else if ([reason isEqual:@"terminated"]) f.guest.appSceneVC.isAppRunning = NO;
     else if ([reason isEqual:@"pip"]) f.guest.appSceneVC.shouldIgnoreSceneUpdates = YES;
-    else if ([reason isEqual:@"covered"]) cover = addGuest(f, @"B");
+    else if ([reason isEqual:@"covered"]) addGuest(f, @"B");
     else if ([reason isEqual:@"modal"]) f.window.rootViewController.presentedViewController = [UIViewController new];
     else if ([reason isEqual:@"non-key-window"]) f.window.isKeyWindow = NO;
-    else if ([reason isEqual:@"detached"]) { otherParent = [UIView new]; [f.retainedObjects addObject:otherParent]; f.guest.view.superview = otherParent; }
-    else if ([reason isEqual:@"other-window"]) { otherWindow = [UIWindow new]; [f.retainedObjects addObject:otherWindow]; f.guest.view.window = otherWindow; }
+    else if ([reason isEqual:@"detached"]) { UIView *parent = [UIView new]; [f.retainedObjects addObject:parent]; f.guest.view.superview = parent; }
+    else if ([reason isEqual:@"other-window"]) { UIWindow *window = [UIWindow new]; [f.retainedObjects addObject:window]; f.guest.view.window = window; }
+    else if ([reason isEqual:@"window-hidden"]) f.window.hidden = YES;
+    else if ([reason isEqual:@"missing-screen"]) f.window.screen = nil;
     else require(NO, @"Unknown rejection scenario");
+}
+
+static void rejected(NSString *reason) {
+    Fixture *f = fixture();
+    makeIneligible(f, reason);
     request(f, UIInterfaceOrientationMaskLandscape);
     require(!f.host.orientationOwner && !f.window.windowScene.requests.count, [@"Ineligible request was accepted: " stringByAppendingString:reason]);
-    (void)cover; (void)otherParent; (void)otherWindow;
 }
 
 static void hiddenCover(void) {
@@ -533,6 +590,7 @@ static void stackChange(NSString *operation) {
 static void lifecycle(NSString *operation) {
     Fixture *f = fixture();
     acceptLandscape(f);
+    setDisplayBrightness(f, 0.8);
     if ([operation isEqual:@"restore"]) { [f.guest maximizeWindow]; require(!f.guest.isMaximized, @"Restore button did not leave maximized mode"); }
     else if ([operation isEqual:@"minimize"]) [f.guest minimizeWindow];
     else if ([operation isEqual:@"pip"]) [f.guest minimizeWindowPiP];
@@ -541,6 +599,7 @@ static void lifecycle(NSString *operation) {
     else if ([operation isEqual:@"disconnect"]) [f.guest appSceneVCOrientationConnectionDidInvalidate:f.guest.appSceneVC];
     else require(NO, @"Unknown window lifecycle scenario");
     requireReleased(f);
+    requireBrightnessRestored(f);
 }
 
 static void backgroundOwner(void) {
@@ -597,16 +656,354 @@ static void guestRouting(void) {
     require(f.host.orientationOwner == f.guest, @"Another guest's disconnected connection released this owner");
 }
 
+static void brightnessRoundtrip(void) {
+    Fixture *f = fixture();
+    UIScreen *screen = f.window.screen;
+    NSDictionary *state = brightnessAction(f.guest, @"get", nil);
+    require([state[@"version"] isEqual:@1] && [state[@"supported"] boolValue] && [state[@"applied"] boolValue] &&
+            fabs([state[@"value"] doubleValue] - screen.brightness) < 0.000001,
+            @"Brightness query did not report the actual display");
+    require(!f.host.adjustedScreen && screen.writes == 1, @"Brightness query changed the display");
+    f.window.isKeyWindow = NO;
+    f.guest.isMaximized = NO;
+    setDisplayBrightness(f, 0.8);
+    setDisplayBrightness(f, 0.65);
+    require(fabs(f.host.originalBrightness - 0.4) < 0.000001, @"Repeated set replaced the original brightness");
+    state = brightnessAction(f.guest, @"set", @(-10));
+    require([state[@"applied"] boolValue] && fabs(screen.brightness - 0.05) < 0.000001, @"Brightness did not clamp to its readable minimum");
+    state = brightnessAction(f.guest, @"set", @10);
+    require([state[@"applied"] boolValue] && screen.brightness == 1, @"Brightness exceeded the physical display range");
+    state = brightnessAction(f.guest, @"get", nil);
+    require([state[@"value"] doubleValue] == 1, @"Brightness query returned a cached guest value");
+    brightnessAction(f.guest, @"restore", nil);
+    requireBrightnessRestored(f);
+    NSUInteger writes = screen.writes;
+    brightnessAction(f.guest, @"restore", nil);
+    require(screen.writes == writes, @"Repeated restore rewrote an unowned display");
+}
+
+static void brightnessValidation(void) {
+    Fixture *f = fixture();
+    NSArray *requests = @[
+        NSNull.null, @[], @{ @"version": @2, @"action": @"set", @"value": @0.8 },
+        @{ @"version": @1, @"action": @"unknown", @"value": @0.8 },
+        @{ @"version": @1, @"action": @"set" },
+        @{ @"version": @1, @"action": @"set", @"value": @"bright" },
+        @{ @"version": @1, @"action": @"set", @"value": @(NAN) },
+        @{ @"version": @1, @"action": @"set", @"value": @(INFINITY) },
+    ];
+    for (id request in requests) {
+        require(![brightnessReply(f.guest, request)[@"applied"] boolValue], @"Malformed brightness request was applied");
+    }
+    requireBrightnessRestored(f);
+    require(f.window.screen.writes == 1, @"Invalid brightness input touched the display");
+}
+
+static void brightnessRouting(void) {
+    Fixture *f = fixture();
+    __block NSDictionary *state;
+    __block NSUInteger replies = 0;
+    [f.guest appSceneVC:[AppSceneViewController new]
+        didRequestDisplayBrightness:@{@"version": @1, @"action": @"set", @"value": @0.8}
+        reply:^(NSDictionary *value) { state = value; ++replies; }];
+    require(replies == 1 && ![state[@"applied"] boolValue] && f.window.screen.writes == 1,
+            @"Another guest's brightness callback reached this display");
+    [f.guest.view removeFromSuperview];
+    state = brightnessAction(f.guest, @"get", nil);
+    require(![state[@"applied"] boolValue] && !f.host.brightnessOwner, @"Detached guest read through its old host");
+}
+
+static void brightnessOwnership(void) {
+    Fixture *f = fixture();
+    setDisplayBrightness(f, 0.8);
+    DecoratedAppSceneViewController *other = addGuest(f, @"B");
+    NSDictionary *state = brightnessAction(other, @"set", @0.6);
+    require([state[@"applied"] boolValue] && f.host.brightnessOwner == other && fabs(f.host.originalBrightness - 0.4) < 0.000001,
+            @"New brightness owner inherited the prior guest's temporary value");
+    NSUInteger writes = f.window.screen.writes;
+    brightnessAction(f.guest, @"restore", nil);
+    [f.guest releaseHostOrientation];
+    require(f.host.brightnessOwner == other && f.window.screen.writes == writes && fabs(f.window.screen.brightness - 0.6) < 0.000001,
+            @"Another guest restored or released the current brightness owner's display");
+    brightnessAction(other, @"restore", nil);
+    requireBrightnessRestored(f);
+}
+
+static void brightnessScreenTransfer(void) {
+    Fixture *f = fixture();
+    UIScreen *original = f.window.screen;
+    setDisplayBrightness(f, 0.8);
+    UIScreen *replacement = [UIScreen new];
+    replacement.brightness = 0.3;
+    f.window.screen = replacement;
+    setDisplayBrightness(f, 0.7);
+    require(fabs(original.brightness - 0.4) < 0.000001 && f.host.adjustedScreen == replacement,
+            @"Moving the host to another display left the former display altered");
+    brightnessAction(f.guest, @"restore", nil);
+    require(fabs(replacement.brightness - 0.3) < 0.000001 && !f.host.adjustedScreen && !f.host.brightnessOwner,
+            @"New display did not recover its own original brightness");
+}
+
+static void brightnessRejected(NSString *reason) {
+    Fixture *f = fixture();
+    UIScreen *screen = f.window.screen;
+    makeIneligible(f, reason);
+    NSDictionary *state = brightnessAction(f.guest, @"set", @0.8);
+    require(![state[@"applied"] boolValue] && !f.host.brightnessOwner && screen.writes == 1,
+            [@"Ineligible guest changed display brightness: " stringByAppendingString:reason]);
+}
+
+static void brightnessLifecycle(NSString *operation) {
+    Fixture *f = fixture();
+    setDisplayBrightness(f, 0.8);
+    if ([operation isEqual:@"deactivate"]) {
+        UIApplication.sharedApplication.applicationState = UIApplicationStateInactive;
+        [f.host hostWillDeactivate:[NSNotification notificationWithName:@"inactive" object:nil]];
+    } else if ([operation isEqual:@"background-layout"]) {
+        setBackground(f, YES);
+        [f.host layoutSubviews];
+    } else if ([operation isEqual:@"covered-layout"]) {
+        addGuest(f, @"B");
+        [f.host layoutSubviews];
+    } else if ([operation isEqual:@"hidden-layout"]) {
+        f.guest.view.hidden = YES;
+        [f.host layoutSubviews];
+    } else if ([operation isEqual:@"remove"]) [f.guest.view removeFromSuperview];
+    else require(NO, @"Unknown brightness lifecycle");
+    requireBrightnessRestored(f);
+    NSUInteger writes = f.window.screen.writes;
+    setBackground(f, NO);
+    activate(f, f.window.windowScene);
+    require(f.window.screen.writes == writes, @"Host activation silently reapplied a released guest brightness");
+}
+
+static void brightnessScenario(NSString *scenario) {
+    if ([scenario isEqual:@"roundtrip"]) brightnessRoundtrip();
+    else if ([scenario isEqual:@"validation"]) brightnessValidation();
+    else if ([scenario isEqual:@"routing"]) brightnessRouting();
+    else if ([scenario isEqual:@"ownership"]) brightnessOwnership();
+    else if ([scenario isEqual:@"screen-transfer"]) brightnessScreenTransfer();
+    else if ([scenario hasPrefix:@"reject-"]) brightnessRejected([scenario substringFromIndex:7]);
+    else if ([scenario hasPrefix:@"lifecycle-"]) brightnessLifecycle([scenario substringFromIndex:10]);
+    else require(NO, @"Unknown brightness scenario");
+}
+
 static void flushChecks(void) {
     NSArray *checks = scheduledChecks.copy;
     [scheduledChecks removeAllObjects];
     for (dispatch_block_t check in checks) check();
 }
 
-static void setGeometry(Fixture *f, BOOL landscape) {
+static void setHostGeometry(Fixture *f, UIInterfaceOrientation orientation) {
+    BOOL landscape = UIInterfaceOrientationIsLandscape(orientation);
     f.window.bounds = CGRectMake(0, 0, landscape ? 844 : 390, landscape ? 390 : 844);
+    f.window.windowScene.interfaceOrientation = orientation;
+}
+
+static void setGuestGeometry(Fixture *f, BOOL landscape) {
     f.guest.appSceneVC.contentView.bounds = CGRectMake(0, 0, landscape ? 844 : 390, landscape ? 334 : 788);
-    f.window.windowScene.interfaceOrientation = landscape ? UIInterfaceOrientationLandscapeLeft : UIInterfaceOrientationPortrait;
+}
+
+static void setGeometry(Fixture *f, BOOL landscape) {
+    setHostGeometry(f, landscape ? UIInterfaceOrientationLandscapeLeft : UIInterfaceOrientationPortrait);
+    setGuestGeometry(f, landscape);
+}
+
+static Fixture *suspendedPiP(UIInterfaceOrientation original) {
+    Fixture *f = fixture();
+    setHostGeometry(f, original);
+    setGuestGeometry(f, UIInterfaceOrientationIsLandscape(original));
+    f.guest.isMaximized = NO;
+    __block NSDictionary *result;
+    [f.guest appSceneVC:f.guest.appSceneVC didRequestInterfaceOrientations:UIInterfaceOrientationMaskLandscapeLeft
+        fullscreen:YES reply:^(NSDictionary *state) { result = state; }];
+    setGeometry(f, YES);
+    flushChecks();
+    require([result[@"applied"] boolValue] && f.host.fullscreenMaximizedController == f.guest,
+            @"PiP setup did not enter fullscreen from a floating guest");
+    setDisplayBrightness(f, 0.8);
+    NSUInteger requestsBeforePiP = f.window.windowScene.requests.count;
+    [f.guest prepareWindowForPictureInPicture];
+    require(!f.guest.view.hidden && f.host.orientationOwner == f.guest &&
+            f.host.requestedOrientations == UIInterfaceOrientationMaskLandscapeLeft &&
+            f.window.windowScene.requests.count == requestsBeforePiP,
+            @"Preparing media PiP must preserve the visible inline source and its fullscreen geometry");
+    f.guest.appSceneVC.shouldIgnoreSceneUpdates = YES;
+    [f.guest minimizeWindowPiP];
+    require(!f.host.orientationOwner && !f.host.requestedOrientations && f.guest.view.hidden,
+            @"Entering PiP did not release the fullscreen host");
+    require(f.host.suspendedOrientationOwner == f.guest && !f.host.pictureInPictureRestorationPending &&
+            [f.host.suspendedFullscreenState[@"orientations"] unsignedIntegerValue] == UIInterfaceOrientationMaskLandscapeLeft &&
+            [f.host.suspendedFullscreenState[@"restoration"] unsignedIntegerValue] == (1UL << original) &&
+            [f.host.suspendedFullscreenState[@"floating"] boolValue],
+            @"Entering PiP lost the fullscreen direction or original window state");
+    requireBrightnessRestored(f);
+    // UIKit may freely rotate the unowned host while the video stays in PiP.
+    setGeometry(f, NO);
+    return f;
+}
+
+static void requirePiPDeferred(Fixture *f, NSUInteger requests) {
+    require(f.host.pictureInPictureRestorationPending && f.host.suspendedOrientationOwner == f.guest &&
+            f.host.pictureInPictureRestorationAttempts == 0 && !f.host.orientationOwner &&
+            f.window.windowScene.requests.count == requests,
+            @"Inactive or invisible PiP return consumed its snapshot or requested geometry early");
+}
+
+static void requirePiPReturned(Fixture *f, UIInterfaceOrientation original) {
+    require(f.host.orientationOwner == f.guest && f.host.requestedOrientations == UIInterfaceOrientationMaskLandscapeLeft &&
+            f.window.windowScene.interfaceOrientation == UIInterfaceOrientationLandscapeLeft &&
+            f.window.bounds.size.width > f.window.bounds.size.height &&
+            f.guest.appSceneVC.contentView.bounds.size.width > f.guest.appSceneVC.contentView.bounds.size.height,
+            @"PiP return did not restore both actual host and guest landscape geometry");
+    require(!f.host.pictureInPictureRestorationPending && !f.host.suspendedOrientationOwner && !f.host.suspendedFullscreenState &&
+            f.host.restorationOrientations == (1UL << original) && f.host.fullscreenMaximizedController == f.guest && f.guest.isMaximized,
+            @"Successful PiP return lost the saved exit direction or floating-window intent");
+}
+
+static void exitReturnedPiP(Fixture *f, UIInterfaceOrientation original) {
+    __block NSDictionary *result;
+    [f.guest appSceneVC:f.guest.appSceneVC didRequestInterfaceOrientations:UIInterfaceOrientationMaskPortrait
+        fullscreen:NO reply:^(NSDictionary *state) { result = state; }];
+    require(f.window.windowScene.requests.lastObject.unsignedIntegerValue == (1UL << original),
+            @"PiP return replaced the pre-fullscreen exit direction with the PiP host's portrait");
+    setHostGeometry(f, original);
+    setGuestGeometry(f, UIInterfaceOrientationIsLandscape(original));
+    flushChecks();
+    require([result[@"applied"] boolValue] && !f.host.orientationOwner && !f.guest.isMaximized,
+            @"Exiting restored PiP fullscreen failed to recover the original floating window");
+}
+
+static void pipReturnScenario(NSString *scenario) {
+    UIInterfaceOrientation original = [scenario isEqual:@"original-direction"]
+        ? UIInterfaceOrientationLandscapeRight : UIInterfaceOrientationPortrait;
+    Fixture *f = suspendedPiP(original);
+    NSUInteger requests = f.window.windowScene.requests.count;
+    if ([scenario isEqual:@"inactive"]) {
+        f.window.windowScene.activationState = UISceneActivationStateForegroundInactive;
+        UIApplication.sharedApplication.applicationState = UIApplicationStateInactive;
+        f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+        [f.guest unminimizeWindowPiP];
+        requirePiPDeferred(f, requests);
+        setBackground(f, NO);
+        activate(f, [UIWindowScene new]);
+        requirePiPDeferred(f, requests);
+        activate(f, f.window.windowScene);
+    } else if ([scenario isEqual:@"active-before-stop"]) {
+        activate(f, f.window.windowScene);
+        require(f.window.windowScene.requests.count == requests && !f.host.pictureInPictureRestorationPending,
+                @"Host activation restored a guest that was still in PiP");
+        f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+        [f.guest unminimizeWindowPiP];
+    } else if ([scenario isEqual:@"hidden"]) {
+        f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+        [f.guest restoreFullscreenAfterPictureInPicture];
+        [f.host layoutSubviews];
+        requirePiPDeferred(f, requests);
+        [f.guest unminimizeWindowPiP];
+    } else if ([scenario isEqual:@"ignored"]) {
+        [f.guest unminimizeWindowPiP];
+        [f.host layoutSubviews];
+        requirePiPDeferred(f, requests);
+        f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+        [f.host layoutSubviews];
+    } else {
+        require([scenario isEqual:@"guest-geometry"] || [scenario isEqual:@"original-direction"], @"Unknown PiP return scenario");
+        f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+        [f.guest unminimizeWindowPiP];
+    }
+    require(f.host.orientationOwner == f.guest && f.host.pictureInPictureRestorationPending && f.host.suspendedFullscreenState,
+            @"PiP return reported success before geometry arrived");
+    if ([scenario isEqual:@"guest-geometry"]) {
+        setHostGeometry(f, UIInterfaceOrientationLandscapeLeft);
+        flushChecks();
+        require(f.host.pictureInPictureRestorationPending && f.host.suspendedFullscreenState && f.guest.isMaximized,
+                @"Host-only rotation prematurely completed PiP return");
+    }
+    setGeometry(f, YES);
+    flushChecks();
+    requirePiPReturned(f, original);
+    exitReturnedPiP(f, original);
+}
+
+static void pipRetryScenario(NSString *scenario) {
+    UIInterfaceOrientation original = UIInterfaceOrientationLandscapeRight;
+    Fixture *f = suspendedPiP(original);
+    NSDictionary *snapshot = f.host.suspendedFullscreenState;
+    NSUInteger failedIndex = f.window.windowScene.requests.count;
+    f.window.windowScene.holdGeometry = YES;
+    f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+    [f.guest unminimizeWindowPiP];
+    require(f.host.pictureInPictureRestorationAttempts == 1 && f.host.orientationOwner == f.guest, @"PiP restoration did not start");
+    if ([scenario isEqual:@"rejection"]) [f.window.windowScene failRequest:failedIndex];
+    else if ([scenario isEqual:@"timeout"]) { fixtureClock = 2.1; flushChecks(); }
+    else require(NO, @"Unknown PiP retry scenario");
+    require(!f.host.orientationOwner && f.host.pictureInPictureRestorationPending &&
+            f.host.suspendedOrientationOwner == f.guest && [f.host.suspendedFullscreenState isEqual:snapshot] && f.guest.isMaximized,
+            @"First geometry failure lost the PiP snapshot or restored the floating window");
+    [f.host restoreHostOrientationIfNeeded];
+    require(f.window.windowScene.requests.count == failedIndex + 1, @"Failed PiP return restored the host over its pending fullscreen intent");
+    flushChecks();
+    require(f.host.orientationOwner == f.guest && f.host.pictureInPictureRestorationAttempts == 2 &&
+            f.window.windowScene.requests.count == failedIndex + 2,
+            @"First PiP geometry failure did not schedule exactly one retry");
+    [f.window.windowScene failRequest:failedIndex];
+    require(f.host.orientationOwner == f.guest && f.host.pictureInPictureRestorationAttempts == 2,
+            @"Late error from the first attempt cancelled its replacement transaction");
+    setGeometry(f, YES);
+    flushChecks();
+    requirePiPReturned(f, original);
+    f.window.windowScene.holdGeometry = NO;
+    exitReturnedPiP(f, original);
+}
+
+static void pipOwnerScenario(NSString *scenario) {
+    Fixture *f = suspendedPiP(UIInterfaceOrientationPortrait);
+    if ([scenario isEqual:@"stale-error"] || [scenario isEqual:@"exit-during-restore"]) f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+    [f.guest unminimizeWindowPiP];
+    NSUInteger requests = f.window.windowScene.requests.count;
+    if ([scenario isEqual:@"exit-during-restore"]) {
+        require(f.host.orientationOwner == f.guest && f.host.pictureInPictureRestorationPending,
+                @"Explicit-exit setup did not have an active PiP restoration transaction");
+        exitReturnedPiP(f, UIInterfaceOrientationPortrait);
+        [f.window.windowScene failRequest:requests - 1];
+        [f.host layoutSubviews];
+        flushChecks();
+        require(!f.host.orientationOwner && !f.host.pictureInPictureRestorationPending && !f.host.suspendedFullscreenState &&
+                !f.guest.isMaximized && f.window.windowScene.requests.count == requests + 1,
+                @"Explicit exit during PiP restoration was undone by its old geometry transaction");
+        return;
+    }
+    if ([scenario isEqual:@"cancelled"] || [scenario isEqual:@"removed"]) {
+        __block NSDictionary *state;
+        if ([scenario isEqual:@"removed"]) [f.guest.view removeFromSuperview];
+        else [f.host requestInterfaceOrientations:UIInterfaceOrientationMaskPortrait forController:f.guest
+            fullscreen:NO reply:^(NSDictionary *value) { state = value; }];
+        f.guest.appSceneVC.shouldIgnoreSceneUpdates = NO;
+        [f.host layoutSubviews];
+        activate(f, f.window.windowScene);
+        require(!f.host.suspendedOrientationOwner && !f.host.suspendedFullscreenState &&
+                !f.host.pictureInPictureRestorationPending && !f.host.orientationOwner && f.window.windowScene.requests.count == requests,
+                @"Closing or explicitly cancelling PiP return resurrected a released fullscreen guest");
+        if (state) require([state[@"reason"] isEqual:@"not_orientation_owner"], @"Suspended fullscreen exit returned the wrong ownership result");
+        return;
+    }
+    require([scenario isEqual:@"takeover"] || [scenario isEqual:@"stale-error"], @"Unknown PiP owner scenario");
+    DecoratedAppSceneViewController *other = addGuest(f, @"B");
+    [other appSceneVC:other.appSceneVC didRequestInterfaceOrientations:UIInterfaceOrientationMaskLandscapeRight];
+    brightnessAction(other, @"set", @0.6);
+    NSUInteger generation = f.host.orientationGeneration;
+    NSUInteger acceptedRequests = f.window.windowScene.requests.count;
+    [f.host layoutSubviews];
+    flushChecks();
+    if ([scenario isEqual:@"stale-error"]) [f.window.windowScene failRequest:requests - 1];
+    [f.guest releaseHostOrientation];
+    require(f.host.orientationOwner == other && f.host.requestedOrientations == UIInterfaceOrientationMaskLandscapeRight &&
+            f.host.orientationGeneration == generation && f.window.windowScene.requests.count == acceptedRequests &&
+            f.host.brightnessOwner == other && fabs(f.window.screen.brightness - 0.6) < 0.000001,
+            @"Old PiP return, delayed error or guest release overwrote the new owner's display state");
+    require(!f.host.pictureInPictureRestorationPending && !f.host.suspendedFullscreenState,
+            @"Superseded PiP snapshot remained available to steal fullscreen later");
 }
 
 static void explicitScenario(NSString *scenario) {
@@ -701,6 +1098,10 @@ int main(int argc, const char *argv[]) {
         else if ([scenario isEqual:@"background-exit"]) backgroundExit();
         else if ([scenario isEqual:@"deferred-owner"]) deferredOwner();
         else if ([scenario isEqual:@"guest-routing"]) guestRouting();
+        else if ([scenario hasPrefix:@"brightness-"]) brightnessScenario([scenario substringFromIndex:11]);
+        else if ([scenario hasPrefix:@"pip-return-"]) pipReturnScenario([scenario substringFromIndex:11]);
+        else if ([scenario hasPrefix:@"pip-retry-"]) pipRetryScenario([scenario substringFromIndex:10]);
+        else if ([scenario hasPrefix:@"pip-owner-"]) pipOwnerScenario([scenario substringFromIndex:10]);
         else if ([scenario hasPrefix:@"v2-"]) explicitScenario(scenario);
         else require(NO, @"Unknown orientation scenario");
         printf("Orientation scenario passed: %s\n", argv[1]);

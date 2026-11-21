@@ -22,6 +22,7 @@ static const CGFloat LCWindowTopBarExtension = 12;
 @property(nonatomic) BOOL hasAppTerminated;
 @property(nonatomic) UIView *windowBarView;
 @property(nonatomic) NSLayoutConstraint *navigationBarTopConstraint;
+@property(nonatomic) UIActivityIndicatorView *pipPreparationIndicator;
 @end
 
 @implementation DecoratedAppSceneViewController
@@ -275,8 +276,49 @@ static const CGFloat LCWindowTopBarExtension = 12;
     }];
 }
 
+- (void)showPictureInPictureError {
+    if (!self.view.window || self.presentedViewController) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"画中画启动失败"
+        message:@"已恢复当前播放，请稍后重试画中画。" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"lc.common.ok".loc style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)setPictureInPicturePreparing:(BOOL)preparing {
+    if (!preparing) {
+        [self.pipPreparationIndicator stopAnimating];
+        [self.pipPreparationIndicator removeFromSuperview];
+        self.pipPreparationIndicator = nil;
+        return;
+    }
+    if (self.pipPreparationIndicator) return;
+    UIView *source = self.appSceneVC.view;
+    UIActivityIndicatorView *indicator = [[UIActivityIndicatorView alloc]
+        initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    indicator.frame = CGRectMake(0, 0, 64, 64);
+    indicator.center = CGPointMake(CGRectGetMidX(source.bounds), CGRectGetMidY(source.bounds));
+    indicator.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
+                                 UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+    indicator.color = UIColor.whiteColor;
+    indicator.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.6];
+    indicator.layer.cornerRadius = 12;
+    indicator.userInteractionEnabled = NO;
+    indicator.accessibilityLabel = @"正在进入画中画";
+    [source addSubview:indicator];
+    [indicator startAnimating];
+    self.pipPreparationIndicator = indicator;
+}
+
+- (void)prepareWindowForPictureInPicture {
+    if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview captureOrientationForPictureInPicture:self];
+    }
+}
+
 - (void)minimizeWindowPiP {
-    [self releaseHostOrientation];
+    if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview suspendOrientationForPictureInPicture:self];
+    }
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.alpha = 0;
     } completion:^(BOOL finished) {
@@ -288,7 +330,15 @@ static const CGFloat LCWindowTopBarExtension = 12;
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         self.view.hidden = NO;
         self.view.alpha = 1;
-    } completion:nil];
+    } completion:^(BOOL finished) {
+        [self restoreFullscreenAfterPictureInPicture];
+    }];
+}
+
+- (void)restoreFullscreenAfterPictureInPicture {
+    if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview restoreOrientationAfterPictureInPicture:self];
+    }
 }
 
 - (void)maximizeWindow {
@@ -419,8 +469,20 @@ static const CGFloat LCWindowTopBarExtension = 12;
     if (vc == self.appSceneVC) [self releaseHostOrientation];
 }
 
+- (void)appSceneVC:(AppSceneViewController *)vc
+ didRequestDisplayBrightness:(NSDictionary *)request
+                            reply:(void (^)(NSDictionary *))reply {
+    if (vc != self.appSceneVC || ![self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        reply(@{@"version": @1, @"supported": @YES, @"applied": @NO});
+        return;
+    }
+    [(VirtualWindowsHostView *)self.view.superview requestDisplayBrightness:request forController:self reply:reply];
+}
+
 - (void)releaseHostOrientation {
     if ([self.view.superview isKindOfClass:VirtualWindowsHostView.class]) {
+        [(VirtualWindowsHostView *)self.view.superview cancelPictureInPictureOrientationForController:self];
+        [(VirtualWindowsHostView *)self.view.superview releaseBrightnessForController:self];
         [(VirtualWindowsHostView *)self.view.superview releaseOrientationForController:self];
     }
 }

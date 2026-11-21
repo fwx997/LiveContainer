@@ -36,6 +36,14 @@ BOOL LCActivatePictureInPictureAudio(void) {
 
 + (NSDictionary *)validatedDescriptor:(NSDictionary *)value {
     if (![value isKindOfClass:NSDictionary.class] || ![value[@"version"] isEqual:@1]) return nil;
+    // Flutter's StandardMessageCodec uses NSNull for absent optional values.
+    // In particular, there cannot be a handoff lease before a host owns PiP.
+    NSMutableDictionary *fields = [value mutableCopy];
+    for (NSString *key in @[@"headers", @"position", @"volume", @"refreshRequest",
+                            @"playing", @"live", @"handoffReady", @"refreshFailed", @"handoffLease"]) {
+        if (fields[key] == NSNull.null) [fields removeObjectForKey:key];
+    }
+    value = fields;
     NSString *session = value[@"session"];
     NSNumber *revision = value[@"revision"];
     if (![session isKindOfClass:NSString.class] || session.length == 0 || session.length > 128) return nil;
@@ -83,7 +91,8 @@ BOOL LCActivatePictureInPictureAudio(void) {
     _layer = [AVPlayerLayer playerLayerWithPlayer:_player];
     _layer.frame = view.bounds;
     _layer.videoGravity = AVLayerVideoGravityResizeAspect;
-    _layer.backgroundColor = UIColor.blackColor.CGColor;
+    // Keep the guest visible while its pause acknowledgement and the first
+    // decoded frame are pending. An opaque placeholder hides the whole app.
     [view.layer addSublayer:_layer];
     _controller = [[AVPictureInPictureController alloc] initWithPlayerLayer:_layer];
     _controller.delegate = delegate;
@@ -105,7 +114,7 @@ BOOL LCActivatePictureInPictureAudio(void) {
     return @{
         @"mediaActive": @(!self.invalidated), @"mediaSession": self.sessionIdentifier,
         @"mediaLease": self.mediaLease,
-        @"mediaReady": @(self.handoffReady),
+        @"mediaReady": @(self.started),
         @"mediaPlaying": @(self.desiredPlaying), @"mediaLive": @([self.descriptor[@"live"] boolValue]),
         @"mediaPosition": @(MAX(0, position)), @"mediaRequest": @(self.refreshRequest),
         @"mediaError": self.playbackError ?: @"",
@@ -114,7 +123,8 @@ BOOL LCActivatePictureInPictureAudio(void) {
 
 - (void)start {
     if (self.invalidated || self.stopping || self.started || self.startTimer) return;
-    self.startDeadline = CACurrentMediaTime() + 15;
+    if (!LCActivatePictureInPictureAudio()) { [self failStart:@"media_audio_failed"]; return; }
+    self.startDeadline = CACurrentMediaTime() + 6;
     __weak typeof(self) weakSelf = self;
     self.startTimer = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
         [weakSelf attemptStart];
@@ -126,13 +136,21 @@ BOOL LCActivatePictureInPictureAudio(void) {
 - (void)attemptStart {
     if (self.invalidated || self.stopping || self.started) return;
     if (CACurrentMediaTime() >= self.startDeadline) {
-        [self failStart:@"media_start_timeout"];
+        [self failStart:[self startupFailureReason]];
         return;
     }
     if (self.starting || !self.handoffReady || self.loading || self.positioning || !self.layer.readyForDisplay) return;
     if (!self.controller.isPictureInPicturePossible) return;
     self.starting = YES;
     [self.controller startPictureInPicture];
+}
+
+- (NSString *)startupFailureReason {
+    if (!self.handoffReady) return @"media_handoff_timeout";
+    if (self.loading) return @"media_loading_timeout";
+    if (self.positioning) return @"media_seek_timeout";
+    if (!self.layer.readyForDisplay) return @"media_frame_timeout";
+    return self.starting ? @"media_transition_timeout" : @"media_pip_unavailable";
 }
 
 - (void)didStart {
@@ -196,7 +214,9 @@ BOOL LCActivatePictureInPictureAudio(void) {
     NSDictionary *options = @{@"AVURLAssetHTTPHeaderFieldsKey": self.loadedHeaders};
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:url options:options];
     AVPlayerItem *item = [AVPlayerItem playerItemWithAsset:asset];
-    item.canUseNetworkResourcesForLiveStreamingWhilePaused = YES;
+    // Resuming live PiP resolves a fresh URL; a paused stale stream need not
+    // keep consuming data in the background.
+    item.canUseNetworkResourcesForLiveStreamingWhilePaused = NO;
     self.observedItem = item;
     [self.player replaceCurrentItemWithPlayerItem:item];
     self.controller.requiresLinearPlayback = [self.descriptor[@"live"] boolValue];
@@ -301,6 +321,7 @@ BOOL LCActivatePictureInPictureAudio(void) {
 - (void)failStart:(NSString *)reason {
     if (self.invalidated || self.stopping) return;
     self.playbackError = reason;
+    NSLog(@"[LCMediaPiP] Start failed: %@", reason);
     [self.startTimer invalidate];
     self.startTimer = nil;
     NSError *error = [NSError errorWithDomain:@"LCMediaPiP" code:1 userInfo:@{NSLocalizedDescriptionKey: reason}];
@@ -341,6 +362,8 @@ BOOL LCActivatePictureInPictureAudio(void) {
     [self.player removeObserver:self forKeyPath:@"rate" context:LCMediaRateContext];
     [self pausePlayer];
     [self.player cancelPendingPrerolls];
+    [self.player replaceCurrentItemWithPlayerItem:nil];
+    self.layer.player = nil;
     [self.layer removeFromSuperlayer];
     self.stateDidChange = nil;
     self.failedToStart = nil;

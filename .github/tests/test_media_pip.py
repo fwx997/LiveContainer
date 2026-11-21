@@ -35,12 +35,19 @@ def run_media_harness():
 
 
 class MediaPiPHarnessTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.harness = production_harness()
+
     def test_harness_uses_the_complete_current_controller(self):
-        harness = production_harness()
+        harness = self.harness
         self.assertNotIn("// INSERT_", harness)
         self.assertNotIn('@import AVKit;', harness)
         self.assertIn("@implementation LCMediaPiPController", harness)
         self.assertIn("late lease cannot authorize a new PiP player", harness)
+
+    def test_media_pip_does_not_customize_private_system_control_styles(self):
+        self.assertNotRegex(self.harness, r"(?i)controlsstyle")
 
 
 if __name__ == "__main__":
