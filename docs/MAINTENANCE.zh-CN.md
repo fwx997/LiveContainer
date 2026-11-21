@@ -57,7 +57,7 @@ Windows 可执行打包和源码拼接检查；依赖 macOS Foundation、clang �
 
 ## 双仓库工作区与备份
 
-本轮合并源码位于 `LC-upstream-20261121/` 和 `SS-upstream-20261121/` 两个独立 worktree。原 `LC-src/` 的 16 项未提交修改及 `SideStore-src/` 保留原状态；不要把它们的旧 HEAD 当作本轮编译来源。完整工作区还包含 `tools/`、`AI_MANUAL.md` 和 `build_check.bat`。以下命令在工作区根目录运行，脚本不属于单独的 LiveContainer 上游克隆：
+本轮合并源码位于 `LC-upstream-20261121/` 和 `SS-upstream-20261121/` 两个独立 worktree。2026-11-21 的 Git 同步已将原 `LC-src/` 的 16 项遗留修改及维护说明提交为 `a902da652108ddab34fa041375511ac9e923255e`（`codex/media-pip-20261110`），代码文件按 LF 归一化后均与 `.34` 源码归档对应文件一致；原 `SideStore-src/` 仍为 `a23d8703`。这些原目录快照不是本轮 `.36` 的编译来源。完整工作区还包含 `tools/`、`AI_MANUAL.md` 和 `build_check.bat`。以下命令在工作区根目录运行，脚本不属于单独的 LiveContainer 上游克隆：
 
 ```powershell
 python -X utf8 -B tools/sync_backup.py
@@ -69,6 +69,6 @@ python -X utf8 -B tools/sync_backup.py
 
 镜像同步会移除备份中已从工作区删除的文件，整理前应按清单保留可恢复副本。完成后逐文件核对相对路径、大小和 SHA-256，保留整理与校验收据。
 
-2026-11-11 的整理清单为工作区 `tools/reports/workspace-cleanup-2026-11-11.json`，备份校验收据为 `tools/reports/backup-verification-2026-11-11.json`。已核对一致的 `.30` 重复下载包和 Python 缓存送入回收站，正式交付包、源码 ZIP、下载摘要及原始验包记录继续保留。重放下载目录的验包步骤前，需重新下载构建附件。
+本次同步校验收据为工作区 `tools/reports/backup-verification-2026-11-21.json`，覆盖原目录快照、最新编译源码归档和维护文档。原 LC 本地回归 11 项通过、23 项因缺少 macOS/Swift 跳过；本次没有重新构建或发布。2026-11-11 的历史整理清单与校验收据继续保留。重放已清理下载目录的验包步骤前，需重新下载构建附件。
 
 恢复时先在空目录克隆两个个人 fork，再覆盖快照内容并保留克隆生成的 `.git`；核对快照记录的分支、提交及子模块版本。构建凭据在本机配置，勿提交到 GitHub。安装包与源码快照分开保管，当前本地交付与公开 Release 分别核对。
