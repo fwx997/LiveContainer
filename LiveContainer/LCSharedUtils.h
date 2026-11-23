@@ -19,4 +19,20 @@
 + (NSArray<NSString*>*)lcUrlSchemes;
 + (BOOL)handleSideStoreCellularCallback:(NSURL*)url;
 + (void)recoverPendingSideStoreCellularData;
++ (NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *)builtInApps;
++ (NSBundle *)hostAppBundle;
++ (NSURL *)builtInAppURL:(NSString *)identifier;
++ (BOOL)builtInAppExists:(NSString *)identifier;
+@end
+
+// Main-thread bridge shared by the three separately loaded applications.
+@interface LCCompanionBridge : NSObject
++ (NSString *)currentAppIdentifier;
++ (NSString *)switchBlockReason;
++ (NSArray<NSDictionary<NSString *, NSString *> *> *)availableApps;
++ (BOOL)openApp:(NSString *)identifier NS_SWIFT_NAME(openApp(_:));
++ (BOOL)openApp:(NSString *)identifier URL:(NSURL * _Nullable)url NS_SWIFT_NAME(openApp(_:url:));
++ (BOOL)handleCompanionURL:(NSURL *)url NS_SWIFT_NAME(handleCompanionURL(_:));
++ (void)installNavigationMenus;
++ (void)setActivity:(NSString *)identifier reason:(NSString * _Nullable)reason NS_SWIFT_NAME(setActivity(_:reason:));
 @end

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>LCContainers</key>
+    <array><dict>
+        <key>folderName</key><string>E7387A9D-7EDB-4BA9-A60B-62B084EA91F4</string>
+        <key>isolateAppGroup</key><false/>
+        <key>name</key><string>SideInstaller</string>
+    </dict></array>
+    <key>LCDataUUID</key><string>E7387A9D-7EDB-4BA9-A60B-62B084EA91F4</string>
+    <key>LCPatchRevision</key><integer>99999</integer>
+    <key>MultitaskSpecified</key><integer>0</integer>
+    <key>dontInjectTweakLoader</key><true/>
+    <key>dontLoadTweakLoader</key><true/>
+    <key>is32bit</key><false/>
+    <key>dontSign</key><true/>
+    <key>fixFilePickerNew</key><true/>
+    <key>fixLocalNotification</key><true/>
+</dict>
+</plist>

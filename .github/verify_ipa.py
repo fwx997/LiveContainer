@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import plistlib
 import struct
+from urllib.parse import urlsplit
 import zipfile
 
 
@@ -74,10 +75,46 @@ def main_bundle(archive, identifier):
     return root, info
 
 
-def verify_combined(combined_path, sidestore_path):
+def verify_sideinstaller(combined, lc_root, lc_info, source_path):
+    if lc_info.get("LCEmbeddedApps") != ["SideStore", "SideInstaller"]:
+        raise ValueError("The three-app package marker is missing or invalid")
+    url = urlsplit(lc_info.get("LCCombinedUpdateURL", ""))
+    if url.scheme != "https" or not url.hostname or url.username or url.password:
+        raise ValueError("The three-app update URL must be HTTPS without credentials")
+    embedded = lc_root + "/Frameworks/SideInstallerApp.framework"
+    info, executable = bundle(combined, embedded)
+    verify_dylib(executable)
+    read_required(combined, embedded + "/LCAppInfo.plist")
+    read_required(combined, embedded + "/SideInstaller-LICENSE.md")
+    with zipfile.ZipFile(source_path) as source:
+        _, original = main_bundle(source, "com.frizzlem.sideinstaller")
+        for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion"):
+            if not original.get(key) or info.get(key) != original[key]:
+                raise ValueError(f"Embedded SideInstaller {key} does not match its source IPA")
+    extension = lc_root + "/PlugIns/SideInstallerLiveActivity.appex"
+    ext_info, ext_executable = bundle(combined, extension)
+    macho_commands(ext_executable, 2)
+    if ext_info.get("CFBundleIdentifier") != lc_info["CFBundleIdentifier"] + ".SideInstallerLiveActivity":
+        raise ValueError("The Live Activity extension must belong to the host")
+    for key in ("CFBundleShortVersionString", "CFBundleVersion"):
+        if ext_info.get(key) != lc_info[key]:
+            raise ValueError("The Live Activity version must match the host")
+    minimum = lambda bundle_info: tuple(int(part) for part in bundle_info.get("MinimumOSVersion", "0").split("."))
+    if minimum(lc_info) < max(minimum(info), minimum(ext_info), (17, 4)):
+        raise ValueError("The host minimum iOS version cannot be lower than SideInstaller's")
+    schemes = [scheme for entry in lc_info.get("CFBundleURLTypes", [])
+               for scheme in entry.get("CFBundleURLSchemes", [])]
+    if "sideinstaller" not in schemes or lc_info.get("NSSupportsLiveActivities") is not True:
+        raise ValueError("SideInstaller's host URL / Live Activity declarations are missing")
+    tasks = lc_info.get("BGTaskSchedulerPermittedIdentifiers", [])
+    if lc_info["CFBundleIdentifier"] + ".install.*" not in tasks:
+        raise ValueError("The host's background installation task is missing")
+
+
+def verify_combined(combined_path, sidestore_path, sideinstaller_path=None):
     with zipfile.ZipFile(sidestore_path) as sidestore, zipfile.ZipFile(combined_path) as combined:
         ss_root, ss_info = main_bundle(sidestore, "com.SideStore.SideStore")
-        lc_root, _ = main_bundle(combined, "com.kdt.livecontainer")
+        lc_root, lc_info = main_bundle(combined, "com.kdt.livecontainer")
         embedded_root = lc_root + "/Frameworks/SideStoreApp.framework"
         embedded_info, executable = bundle(combined, embedded_root)
         for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion"):
@@ -90,6 +127,11 @@ def verify_combined(combined_path, sidestore_path):
             raise ValueError("Embedded Chinese strings do not match the source SideStore IPA")
         if not plistlib.loads(strings):
             raise ValueError("Embedded Chinese strings are empty")
+        has_installer = lc_root + "/Frameworks/SideInstallerApp.framework/Info.plist" in combined.namelist()
+        if sideinstaller_path is not None:
+            verify_sideinstaller(combined, lc_root, lc_info, sideinstaller_path)
+        elif has_installer or "SideInstaller" in lc_info.get("LCEmbeddedApps", []):
+            raise ValueError("A three-app package requires its SideInstaller source for verification")
     return ss_info["CFBundleShortVersionString"]
 
 
@@ -100,12 +142,13 @@ def main():
     combined = subparsers.add_parser("combined")
     combined.add_argument("path", type=Path)
     combined.add_argument("sidestore", type=Path)
+    combined.add_argument("--sideinstaller", type=Path)
     args = parser.parse_args()
     try:
         if args.mode == "dylib":
             verify_dylib(args.path.read_bytes())
         else:
-            print("Verified embedded SideStore:", verify_combined(args.path, args.sidestore))
+            print("Verified combined package:", verify_combined(args.path, args.sidestore, args.sideinstaller))
     except (OSError, ValueError, zipfile.BadZipFile) as error:
         parser.exit(1, f"IPA validation failed: {error}\n")
 

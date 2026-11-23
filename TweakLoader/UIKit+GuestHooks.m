@@ -673,8 +673,10 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
         return LCControlAppURLHandlingStop;
     }
 
+    if ([NSClassFromString(@"LCCompanionBridge") handleCompanionURL:url]) return LCControlAppURLHandlingStop;
+
     // pass through sidestore urls
-    if(NSUserDefaults.isSideStore && ![url.scheme isEqualToString:@"livecontainer"]) {
+    if(NSUserDefaults.builtInAppIdentifier && ![url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) {
         return LCControlAppURLHandlingPassThrough;
     }
 
@@ -723,7 +725,7 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
         }
         // current bundlename and container folder name matches OR sidestore is running and we are launching builtinSideStore
         if (([bundleName isEqualToString:NSBundle.mainBundle.bundlePath.lastPathComponent] && [containerId isEqualToString:containerFolderName]) ||
-            (NSUserDefaults.isSideStore && [bundleName isEqualToString:@"builtinSideStore"])) {
+            [bundleName isEqualToString:NSUserDefaults.builtInAppIdentifier]) {
             if(openUrl) {
                 if([openUrl hasPrefix:@"file:"]) {
                     resolveLaunchExtensionFileBookmark();
@@ -734,8 +736,10 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
                 }
             }
         } else {
-            if([bundleName isEqualToString:@"builtinSideStore"]) {
-                LCShowSwitchAppConfirmation(url, @"SideStore", NO);
+            NSDictionary *builtIns = [NSClassFromString(@"LCSharedUtils") builtInApps];
+            if(bundleName.length && builtIns[bundleName]) {
+                NSString *name = builtIns[bundleName][@"name"];
+                LCShowSwitchAppConfirmation(url, name, NO);
                 return LCControlAppURLHandlingStop;
             }
             handleLiveContainerLaunch(bundleName, containerFolderName, url);
@@ -869,7 +873,11 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
 }
 
 - (void)hook_openURL:(NSURL *)url options:(NSDictionary<NSString *,id> *)options completionHandler:(void (^)(_Bool))completion {
-    if(NSUserDefaults.isSideStore && ![url.scheme isEqualToString:@"livecontainer"]) {
+    if ([NSClassFromString(@"LCCompanionBridge") handleCompanionURL:url]) {
+        if (completion) completion(YES);
+        return;
+    }
+    if(NSUserDefaults.builtInAppIdentifier && ![url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) {
         [self hook_openURL:url options:options completionHandler:completion];
         return;
     }
@@ -955,6 +963,14 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
 }
 
 - (void)hook_openURL:(NSURL *)url options:(UISceneOpenExternalURLOptions *)options completionHandler:(void (^)(BOOL success))completion {
+    if ([NSClassFromString(@"LCCompanionBridge") handleCompanionURL:url]) {
+        if (completion) completion(YES);
+        return;
+    }
+    if(NSUserDefaults.builtInAppIdentifier && ![url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) {
+        [self hook_openURL:url options:options completionHandler:completion];
+        return;
+    }
     BOOL openSelf = canAppOpenItself(url);
     BOOL redirectToHost = shouldRedirectOpenURLToHost(url);
     if(openSelf || redirectToHost) {

@@ -134,6 +134,11 @@ class RefreshHandler: NSObject, RefreshServer {
     
     static var shared = RefreshHandler()
 
+    @objc(companionSwitchBlockReason)
+    static func companionSwitchBlockReason() -> String? {
+        shared.requestIdentifier == nil ? nil : "SideStore 正在后台续签，请完成后再切换。"
+    }
+
     @objc(handleCellularCallback:)
     nonisolated static func handleCellularCallback(_ url: URL) {
         Task { @MainActor in

@@ -6,6 +6,7 @@ set -eu
 if [ "${LC_PACKAGE_ONLY:-0}" != "1" ]; then
     python3 .github/tests/test_background_refresh.py --require-swift -v || exit $?
     python3 -m unittest discover -s .github/tests -p test_ipa_packaging.py -v
+    python3 -m unittest discover -s .github/tests -p test_three_app_packaging.py -v
 fi
 
 # Build the same pinned converter for the runner's own CPU architecture.
@@ -82,6 +83,14 @@ mv ./Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/PlugIns/AltWidg
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable LiveWidgetExtension"  ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/Info.plist
 mv ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/AltWidgetExtension ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/LiveWidgetExtension
 
+# The optional third application is compiled independently, then converted just
+# like SideStore. Its extension and system declarations belong to the host.
+if [ -n "${SIDEINSTALLER_IPA_PATH:-}" ]; then
+    python3 .github/embed_sideinstaller.py "$SIDEINSTALLER_IPA_PATH" Payload/LiveContainer.app \
+        --converter ./dylibify --update-url "$LC_COMBINED_UPDATE_URL" \
+        --license "$SIDEINSTALLER_LICENSE_PATH"
+fi
+
 # Sign
 rm -rf .zsign_cache
 find Payload -type d -name "_CodeSignature" -prune -exec rm -rf {} +
@@ -89,5 +98,11 @@ find Payload -type d -name "_CodeSignature" -prune -exec rm -rf {} +
 ldid -S.github/sidelc/LiveWidgetExtension_adhoc.xml ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/LiveWidgetExtension
 
 # package
-zip -r "$scheme+SideStore.ipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX"
-python3 .github/verify_ipa.py combined "$scheme+SideStore.ipa" tmp/SideStore.ipa
+if [ -n "${SIDEINSTALLER_IPA_PATH:-}" ]; then
+    zip -r "$scheme+SideStore+SideInstaller.ipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX"
+    python3 .github/verify_ipa.py combined "$scheme+SideStore+SideInstaller.ipa" tmp/SideStore.ipa \
+        --sideinstaller "$SIDEINSTALLER_IPA_PATH"
+else
+    zip -r "$scheme+SideStore.ipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX"
+    python3 .github/verify_ipa.py combined "$scheme+SideStore.ipa" tmp/SideStore.ipa
+fi

@@ -14,6 +14,36 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 
 @implementation LCSharedUtils
 
++ (NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *)builtInApps {
+    return @{
+        @"builtinSideStore": @{@"name": @"SideStore", @"framework": @"SideStoreApp.framework", @"directory": @"SideStore", @"scheme": @"sidestore"},
+        @"builtinSideInstaller": @{@"name": @"SideInstaller", @"framework": @"SideInstallerApp.framework", @"directory": @"SideInstaller", @"scheme": @"sideinstaller"}
+    };
+}
+
++ (NSBundle *)hostAppBundle {
+    NSBundle *bundle = NSUserDefaults.lcMainBundle ?: NSBundle.mainBundle;
+    if ([bundle.bundleURL.pathExtension isEqualToString:@"appex"]) {
+        NSURL *url = bundle.bundleURL.URLByDeletingLastPathComponent.URLByDeletingLastPathComponent;
+        return [NSBundle bundleWithURL:url];
+    }
+    return bundle;
+}
+
++ (NSURL *)builtInAppURL:(NSString *)identifier {
+    if (!identifier.length) return nil;
+    NSString *framework = [self builtInApps][identifier][@"framework"];
+    if (!framework) return nil;
+    return [[self.hostAppBundle.bundleURL URLByAppendingPathComponent:@"Frameworks"] URLByAppendingPathComponent:framework];
+}
+
++ (BOOL)builtInAppExists:(NSString *)identifier {
+    NSURL *url = [self builtInAppURL:identifier];
+    if (!url) return NO;
+    NSBundle *bundle = [NSBundle bundleWithURL:url];
+    return bundle.executablePath.length && [NSFileManager.defaultManager fileExistsAtPath:bundle.executablePath];
+}
+
 + (BOOL)handleSideStoreCellularCallback:(NSURL*)url {
     if (![url.scheme.lowercaseString isEqualToString:lcAppUrlScheme.lowercaseString] ||
         ![url.host.lowercaseString isEqualToString:@"cellular-refresh"]) {
@@ -232,6 +262,9 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
             containerFolderName = queryItem.value;
         }
     }
+    if ([launchBundleId isEqualToString:@"ui"] || (launchBundleId.length && [self builtInApps][launchBundleId])) {
+        return [LCCompanionBridge openApp:launchBundleId URL:openUrl.length ? [NSURL URLWithString:openUrl] : nil];
+    }
     if(launchBundleId) {
         if (openUrl) {
             [lcUserDefaults setObject:openUrl forKey:@"launchAppUrlScheme"];
@@ -384,6 +417,11 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 }
 
 + (NSBundle*)findBundleWithBundleId:(NSString*)bundleId isSharedAppOut:(bool*)isSharedAppOut {
+    NSURL *builtInURL = [self builtInAppURL:bundleId];
+    if (builtInURL) {
+        if (isSharedAppOut) *isSharedAppOut = false;
+        return [NSBundle bundleWithURL:builtInURL];
+    }
     NSString *docPath = [NSString stringWithFormat:@"%s/Documents", getenv("LC_HOME_PATH")];
     
     NSURL *appGroupFolder = nil;
@@ -436,6 +474,11 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 }
 
 + (NSString*)findDefaultContainerWithBundleId:(NSString*)bundleId {
+    NSURL *builtInURL = [self builtInAppURL:bundleId];
+    if (builtInURL) {
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfURL:[builtInURL URLByAppendingPathComponent:@"LCAppInfo.plist"]];
+        return info[@"LCDataUUID"];
+    }
     // find app's default container
     NSURL* appGroupFolder = [[LCSharedUtils appGroupPath] URLByAppendingPathComponent:@"LiveContainer"];
     
@@ -477,5 +520,251 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
     }
 
     return result;
+}
+@end
+
+static NSMutableDictionary<NSString *, NSString *> *LCCompanionActivities;
+static BOOL LCCompanionSwitchPending;
+static NSDictionary *LCCompanionPendingLink;
+static NSString *const LCCompanionMenuID = @"lc.companion.switch";
+
+static UIViewController *LCForegroundController(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (scene.activationState != UISceneActivationStateForegroundActive || ![scene isKindOfClass:UIWindowScene.class]) continue;
+        UIWindow *window = ((UIWindowScene *)scene).keyWindow;
+        UIViewController *controller = window.rootViewController;
+        while (controller.presentedViewController) controller = controller.presentedViewController;
+        if (controller) return controller;
+    }
+    return nil;
+}
+
+static BOOL LCCompanionHasPresentedSheet(void) {
+    UIViewController *controller = LCForegroundController();
+    if (!controller.presentingViewController) return NO;
+    if ([controller isKindOfClass:UIAlertController.class]) return YES;
+    if ([controller.presentationController isKindOfClass:UISheetPresentationController.class]) return YES;
+    return controller.modalPresentationStyle == UIModalPresentationFullScreen;
+}
+
+static void LCShowCompanionMessage(NSString *message) {
+    UIViewController *controller = LCForegroundController();
+    if (!controller || [controller isKindOfClass:UIAlertController.class]) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"切换应用" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];
+    [controller presentViewController:alert animated:YES completion:nil];
+}
+
+@interface UIViewController (LCCompanionNavigation)
+- (void)lc_companionViewDidAppear:(BOOL)animated;
+- (void)lc_companionViewDidLayoutSubviews;
+@end
+
+@implementation LCCompanionBridge
+
++ (NSString *)currentAppIdentifier {
+    return NSUserDefaults.builtInAppIdentifier ?: (NSUserDefaults.lcGuestAppId ?: @"ui");
+}
+
++ (NSArray<NSDictionary<NSString *, NSString *> *> *)availableApps {
+    NSMutableArray *apps = [NSMutableArray arrayWithObject:@{@"identifier": @"ui", @"name": @"LiveContainer", @"shortName": @"LC"}];
+    for (NSString *identifier in @[@"builtinSideStore", @"builtinSideInstaller"]) {
+        if (![LCSharedUtils builtInAppExists:identifier]) continue;
+        NSString *name = [LCSharedUtils builtInApps][identifier][@"name"];
+        [apps addObject:@{@"identifier": identifier, @"name": name, @"shortName": [identifier isEqualToString:@"builtinSideStore"] ? @"SS" : @"SI"}];
+    }
+    return apps;
+}
+
++ (void)setActivity:(NSString *)identifier reason:(NSString *)reason {
+    if (!NSThread.isMainThread) {
+        dispatch_sync(dispatch_get_main_queue(), ^{ [self setActivity:identifier reason:reason]; });
+        return;
+    }
+    if (!LCCompanionActivities) LCCompanionActivities = [NSMutableDictionary dictionary];
+    if (reason.length) LCCompanionActivities[identifier] = reason;
+    else [LCCompanionActivities removeObjectForKey:identifier];
+}
+
++ (NSString *)switchBlockReason {
+    if (!NSThread.isMainThread || NSUserDefaults.isLiveProcess) return @"请回到主应用切换。";
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return @"请在前台切换应用。";
+    if (LCCompanionSwitchPending) return @"正在切换应用，请稍候。";
+    if (LCCompanionHasPresentedSheet()) return @"请先完成或关闭当前弹窗，再切换应用。";
+    if (LCCompanionActivities.count) return LCCompanionActivities.allValues.firstObject;
+    Class refresh = NSClassFromString(@"LCRefreshHandler");
+    SEL refreshSelector = NSSelectorFromString(@"companionSwitchBlockReason");
+    NSString *refreshReason = [refresh respondsToSelector:refreshSelector] ? ((id (*)(id, SEL))objc_msgSend)(refresh, refreshSelector) : nil;
+    if (refreshReason.length) return refreshReason;
+    NSString *identifier = [self currentAppIdentifier];
+    NSString *className = @"LCCompanionActivityBridge";
+    if ([identifier isEqualToString:@"builtinSideStore"]) className = @"SSCompanionActivityBridge";
+    if ([identifier isEqualToString:@"builtinSideInstaller"]) className = @"SICompanionBridge";
+    Class activity = NSClassFromString(className);
+    SEL selector = NSSelectorFromString(@"switchBlockReason");
+    if ([activity respondsToSelector:selector]) return ((id (*)(id, SEL))objc_msgSend)(activity, selector);
+    if (NSUserDefaults.builtInAppIdentifier) return @"应用正在准备，请稍后再切换。";
+    return nil;
+}
+
++ (BOOL)openApp:(NSString *)identifier {
+    return [self openApp:identifier URL:nil];
+}
+
++ (BOOL)openApp:(NSString *)identifier URL:(NSURL *)url {
+    if (!NSThread.isMainThread) return NO;
+    if (!url && [[self currentAppIdentifier] isEqualToString:identifier]) return YES;
+    BOOL isUI = [identifier isEqualToString:@"ui"];
+    if (!isUI && ![LCSharedUtils builtInAppExists:identifier]) {
+        LCShowCompanionMessage(@"内置应用文件缺失，请重新安装完整组合包。");
+        return NO;
+    }
+    NSString *reason = [self switchBlockReason];
+    if (reason.length) {
+        LCShowCompanionMessage(reason);
+        return NO;
+    }
+    if ([[self currentAppIdentifier] isEqualToString:identifier]) {
+        if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+        return YES;
+    }
+    NSUserDefaults *defaults = NSUserDefaults.lcUserDefaults;
+    [defaults removeObjectForKey:@"LCOpenSideStore"];
+    [defaults removeObjectForKey:@"selectedContainer"];
+    [defaults removeObjectForKey:@"webPageToOpen"];
+    [defaults setObject:url.absoluteString forKey:@"launchAppUrlScheme"];
+    [defaults setObject:identifier forKey:@"selected"];
+    [defaults synchronize];
+    LCCompanionSwitchPending = YES;
+    return [LCSharedUtils launchToGuestAppWithClassicMode:0];
+}
+
++ (BOOL)handleCompanionURL:(NSURL *)url {
+    if (!NSThread.isMainThread || NSUserDefaults.isLiveProcess) return NO;
+    NSString *target = nil;
+    NSURL *forwardURL = url;
+    for (NSString *identifier in [LCSharedUtils builtInApps]) {
+        NSString *scheme = [LCSharedUtils builtInApps][identifier][@"scheme"];
+        if ([url.scheme.lowercaseString isEqualToString:scheme]) target = identifier;
+    }
+    BOOL hostLink = [url.scheme.lowercaseString isEqualToString:NSUserDefaults.lcAppUrlScheme.lowercaseString];
+    if (hostLink && [url.host isEqualToString:@"livecontainer-launch"]) {
+        forwardURL = nil;
+        NSURLComponents *parts = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+        for (NSURLQueryItem *item in parts.queryItems) {
+            if ([item.name isEqualToString:@"bundle-name"]) target = item.value;
+            if ([item.name isEqualToString:@"open-url"]) {
+                NSData *data = [[NSData alloc] initWithBase64EncodedString:item.value options:0];
+                NSString *decoded = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+                forwardURL = decoded.length ? [NSURL URLWithString:decoded] : nil;
+            }
+        }
+    }
+    BOOL knownTarget = [target isEqualToString:@"ui"] || [LCSharedUtils builtInAppExists:target];
+    if (!knownTarget || [[self currentAppIdentifier] isEqualToString:target]) return NO;
+    if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+        [self openApp:target URL:forwardURL];
+        return YES;
+    }
+    LCCompanionPendingLink = @{@"target": target, @"url": forwardURL ?: NSNull.null, @"date": NSDate.date};
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+            NSDictionary *link = LCCompanionPendingLink;
+            LCCompanionPendingLink = nil;
+            NSURL *payload = [link[@"url"] isKindOfClass:NSURL.class] ? link[@"url"] : nil;
+            if (link && -[link[@"date"] timeIntervalSinceNow] < 30) [self openApp:link[@"target"] URL:payload];
+        }];
+    });
+    return YES;
+}
+
++ (UIMenu *)navigationMenu {
+    UIDeferredMenuElement *choices = [UIDeferredMenuElement elementWithUncachedProvider:^(void (^completion)(NSArray<UIMenuElement *> *)) {
+        NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
+        NSString *reason = [self switchBlockReason];
+        NSString *current = [self currentAppIdentifier];
+        for (NSDictionary *app in [self availableApps]) {
+            NSString *identifier = app[@"identifier"];
+            UIAction *action = [UIAction actionWithTitle:app[@"name"] image:nil identifier:nil handler:^(__kindof UIAction *action) {
+                [self openApp:identifier];
+            }];
+            action.state = [identifier isEqualToString:current] ? UIMenuElementStateOn : UIMenuElementStateOff;
+            action.attributes = reason.length || action.state == UIMenuElementStateOn ? UIMenuElementAttributesDisabled : 0;
+            [items addObject:action];
+        }
+        if (reason.length) {
+            UIAction *message = [UIAction actionWithTitle:reason image:nil identifier:nil handler:^(__kindof UIAction *action) {}];
+            message.attributes = UIMenuElementAttributesDisabled;
+            [items addObject:message];
+        }
+        completion(items);
+    }];
+    return [UIMenu menuWithTitle:@"切换应用" children:@[choices]];
+}
+
++ (BOOL)isPrimaryNavigation:(UINavigationController *)navigation {
+    if (!navigation || navigation.isNavigationBarHidden) return NO;
+    UIViewController *root = navigation.view.window.rootViewController;
+    UIViewController *owner = navigation;
+    while (owner && owner != root) {
+        if (owner.presentingViewController) return NO;
+        owner = owner.parentViewController;
+    }
+    return root && owner == root && !navigation.presentingViewController;
+}
+
++ (NSArray<UIBarButtonItem *> *)withoutSwitcher:(NSArray<UIBarButtonItem *> *)items {
+    NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(UIBarButtonItem *item, NSDictionary *bindings) {
+        return ![item.accessibilityIdentifier isEqualToString:LCCompanionMenuID];
+    }];
+    return [items filteredArrayUsingPredicate:predicate] ?: @[];
+}
+
++ (void)updateNavigationForController:(UIViewController *)controller {
+    UINavigationController *navigation = controller.navigationController;
+    if (![self isPrimaryNavigation:navigation] || self.availableApps.count < 2) return;
+    UIViewController *top = navigation.topViewController;
+    if (!top || top.presentedViewController) return;
+    BOOL isRoot = navigation.viewControllers.firstObject == top;
+    UINavigationItem *item = top.navigationItem;
+    NSArray *expectedItems = isRoot ? item.leftBarButtonItems : item.rightBarButtonItems;
+    for (UIBarButtonItem *existing in expectedItems) {
+        if ([existing.accessibilityIdentifier isEqualToString:LCCompanionMenuID]) return;
+    }
+    NSArray *left = [self withoutSwitcher:item.leftBarButtonItems];
+    NSArray *right = [self withoutSwitcher:item.rightBarButtonItems];
+    NSString *shortName = NSUserDefaults.isSideStore ? @"SS ▾" : @"LC ▾";
+    if ([NSUserDefaults.builtInAppIdentifier isEqualToString:@"builtinSideInstaller"]) shortName = @"SI ▾";
+    UIImage *image = isRoot ? nil : [UIImage systemImageNamed:@"square.grid.2x2"];
+    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithTitle:isRoot ? shortName : nil image:image primaryAction:nil menu:[self navigationMenu]];
+    switcher.accessibilityIdentifier = LCCompanionMenuID;
+    switcher.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
+    item.leftBarButtonItems = isRoot ? [left arrayByAddingObject:switcher] : (left.count ? left : nil);
+    item.rightBarButtonItems = isRoot ? right : [right arrayByAddingObject:switcher];
+}
+
++ (void)installNavigationMenus {
+    if (NSUserDefaults.isLiveProcess) return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        swizzle(UIViewController.class, @selector(viewDidAppear:), @selector(lc_companionViewDidAppear:));
+        swizzle(UIViewController.class, @selector(viewDidLayoutSubviews), @selector(lc_companionViewDidLayoutSubviews));
+    });
+}
+@end
+
+@implementation UIViewController (LCCompanionNavigation)
+- (void)lc_companionViewDidLayoutSubviews {
+    [self lc_companionViewDidLayoutSubviews];
+    if (self.viewIfLoaded.window) [LCCompanionBridge updateNavigationForController:self];
+}
+- (void)lc_companionViewDidAppear:(BOOL)animated {
+    [self lc_companionViewDidAppear:animated];
+    [LCCompanionBridge updateNavigationForController:self];
+    __weak UIViewController *controller = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (controller.viewIfLoaded.window) [LCCompanionBridge updateNavigationForController:controller];
+    });
 }
 @end

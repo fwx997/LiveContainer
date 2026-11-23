@@ -234,15 +234,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     }
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    if(UserDefaults.sideStoreExist()) {
-                        Button {
-                            LCUtils.openSideStore(delegate: self)
-                        } label: {
-                            IconImageView(icon: BuiltInSideStoreAppInfo.shared.iconIsDarkIcon(darkModeIcon))
-                                .frame(width: UIFont.preferredFont(forTextStyle: .body).lineHeight, height: UIFont.preferredFont(forTextStyle: .body).lineHeight)
-
-                        }
-                    } else {
+                    if LCCompanionBridge.availableApps().count < 2 {
                         Button("Help", systemImage: "questionmark") {
                             helpPresent = true
                         }
@@ -572,6 +564,9 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
 
     
     func startInstallApp(_ fileUrl:URL) async {
+        let activity = UUID().uuidString
+        LCCompanionBridge.setActivity(activity, reason: "正在安装应用，请完成后再切换。")
+        defer { LCCompanionBridge.setActivity(activity, reason: nil) }
         do {
             self.installprogressVisible = true
             try await installIpaFile(fileUrl)
@@ -851,8 +846,11 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
         
         self.installprogressVisible = true
+        let activity = UUID().uuidString
+        LCCompanionBridge.setActivity(activity, reason: "正在下载或安装应用，请完成后再切换。")
         defer {
             self.installprogressVisible = false
+            LCCompanionBridge.setActivity(activity, reason: nil)
         }
         
         if installUrl.isFileURL {
@@ -1162,14 +1160,14 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     }
     
     func handleURL(url : URL) {
+        if LCCompanionBridge.handleCompanionURL(url) { return }
         if url.isFileURL {
             Task { await installFromUrl(urlStr: url.absoluteString) }
             return
         }
         
         if url.scheme == "sidestore" && UserDefaults.sideStoreExist() {
-            UserDefaults.standard.setValue(url.absoluteString, forKey: "launchAppUrlScheme")
-            LCUtils.openSideStore(delegate: self)
+            LCUtils.openSideStore(delegate: self, urlStr: url.absoluteString)
             return
         }
         

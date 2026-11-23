@@ -328,6 +328,9 @@ struct LCTweakFolderView : View {
     }
     
     func signAllTweaks() async {
+        let activity = UUID().uuidString
+        LCCompanionBridge.setActivity(activity, reason: "正在签名插件，请完成后再切换。")
+        defer { LCCompanionBridge.setActivity(activity, reason: nil) }
         do {
             defer {
                 isTweakSigning = false

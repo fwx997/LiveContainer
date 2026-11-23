@@ -96,6 +96,9 @@ static id SSSceneObserver;
 @end
 
 NSURL* SideStoreSource_hook_altStoreSourceURL(id self, SEL cmd) {
+    NSString *combinedSource = [LCSharedUtils.hostAppBundle objectForInfoDictionaryKey:@"LCCombinedSourceURL"];
+    NSURL *combinedURL = combinedSource.length ? [NSURL URLWithString:combinedSource] : nil;
+    if ([combinedURL.scheme.lowercaseString isEqualToString:@"https"] && combinedURL.host.length) return combinedURL;
     static NSURL* sourceURL = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -126,30 +129,6 @@ NSURL* SideStoreSource_hook_altStoreSourceURL(id self, SEL cmd) {
 }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wundeclared-selector"
-void (*SideStoreMyAppsViewController_orig_viewDidload)(UICollectionViewController* self, SEL cmd) = nil;
-void SideStoreMyAppsViewController_hook_viewDidload(UICollectionViewController* self, SEL cmd) {
-    if(!SideStoreMyAppsViewController_orig_viewDidload) return;
-    SideStoreMyAppsViewController_orig_viewDidload(self, cmd);
-    
-    UIImage *escapeImage = [UIImage systemImageNamed:@"escape"];
-    UIBarButtonItem *escapeItem = [[UIBarButtonItem alloc] initWithImage:escapeImage
-                                                                   style:UIBarButtonItemStylePlain
-                                                                  target:self
-                                                                  action:@selector(escapeButtonTapped:)];
-        
-    NSMutableArray* oldToolBarItems = [self.navigationItem.leftBarButtonItems mutableCopy];
-    [oldToolBarItems addObject:escapeItem];
-    self.navigationItem.leftBarButtonItems = oldToolBarItems;
-}
-
-void SideStoreMyAppsViewController_hook_escapeButtonTapped(UICollectionViewController* self, SEL cmd, id target) {
-    [LCSharedUtils launchToGuestAppWithClassicMode:0];
-}
-
-
-
-
-
 static void SSInstallVersionWindow(UIWindowScene *windowScene)
 {
     NSString *identifier = windowScene.session.persistentIdentifier;
@@ -225,11 +204,7 @@ void installSideStoreHooks(void) {
     method_setImplementation(altStoreSourceURLMethod, (IMP)SideStoreSource_hook_altStoreSourceURL);
     
     if (!NSUserDefaults.isLiveProcess) {
-        // add escape button
-        Method viewDidLoadMethod = class_getInstanceMethod(PrivClass(MyAppsViewController), @selector(viewDidLoad));
-        SideStoreMyAppsViewController_orig_viewDidload = (void (*)(UICollectionViewController *, SEL))method_getImplementation(viewDidLoadMethod);
-        method_setImplementation(viewDidLoadMethod, (IMP)SideStoreMyAppsViewController_hook_viewDidload);
-        class_addMethod(PrivClass(MyAppsViewController), @selector(escapeButtonTapped:), (IMP)SideStoreMyAppsViewController_hook_escapeButtonTapped, "v@:@");
+        [LCCompanionBridge installNavigationMenus];
         
         // add version number
         SSVersionWindows = [NSMutableDictionary dictionary];

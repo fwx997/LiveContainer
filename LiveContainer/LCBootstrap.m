@@ -33,6 +33,7 @@ bool isLiveProcess = false;
 bool isSharedBundle = false;
 bool isSideStore = false;
 bool sideStoreExist = false;
+static NSString *builtInAppIdentifier;
 
 @implementation NSUserDefaults(LiveContainer)
 + (instancetype)lcUserDefaults {
@@ -72,6 +73,9 @@ bool sideStoreExist = false;
 }
 + (bool)sideStoreExist {
     return sideStoreExist;
+}
++ (NSString*)builtInAppIdentifier {
+    return builtInAppIdentifier;
 }
 
 + (NSString*)lcGuestAppId {
@@ -293,7 +297,7 @@ NSString *LCRunGuestExtension(NSDictionary *request, int argc, char *argv[], cha
     NSURLSCGuestHooksInit();
     GuestExtensionHooksInit();
 
-    if (!LCSharedUtils.certificatePassword && !isSideStore) {
+    if (!LCSharedUtils.certificatePassword && !builtInAppIdentifier) {
 #if !TARGET_OS_SIMULATOR
         if(@available(iOS 26.0 ,*))  {
             return @"JITLess mode is required since iOS 26. Please set it up in settings. \nPlease go to LiveContainer settings -> tap \"Import Certificate from SideStore\" / \"Import Certificate\"";
@@ -334,7 +338,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     if([[lcUserDefaults objectForKey:@"LCWaitForDebugger"] boolValue]) {
         sleep(100);
     }
-    if (!LCSharedUtils.certificatePassword && !isSideStore) {
+    if (!LCSharedUtils.certificatePassword && !builtInAppIdentifier) {
 #if !TARGET_OS_SIMULATOR
         if(@available(iOS 26.0 ,*))  {
             return @"JITLess mode is required since iOS 26. Please set it up in settings. \nPlease go to LiveContainer settings -> tap \"Import Certificate from SideStore\" / \"Import Certificate\"";
@@ -356,19 +360,17 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     NSURL *appGroupFolder = nil;
     
     NSString *bundlePath = 0;
-    if(!isSideStore) {
+    if(!builtInAppIdentifier) {
         bundlePath = [NSString stringWithFormat:@"%@/Applications/%@", docPath, selectedApp];
-    } else if (isLiveProcess) {
-        bundlePath = [[NSBundle.mainBundle.bundleURL.URLByDeletingLastPathComponent.URLByDeletingLastPathComponent URLByAppendingPathComponent:@"Frameworks/SideStoreApp.framework"] path];
     } else {
-        bundlePath = [[NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"Frameworks/SideStoreApp.framework"] path];
+        bundlePath = [LCSharedUtils builtInAppURL:builtInAppIdentifier].path;
     }
     
 
     guestAppInfo = [NSDictionary dictionaryWithContentsOfFile:[NSString stringWithFormat:@"%@/LCAppInfo.plist", bundlePath]];
 
     // not found locally, let's look for the app in shared folder
-    if(!guestAppInfo) {
+    if(!guestAppInfo && !builtInAppIdentifier) {
         NSURL *appGroupPath = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:[LCSharedUtils appGroupID]];
         appGroupFolder = [appGroupPath URLByAppendingPathComponent:@"LiveContainer"];
         bundlePath = [NSString stringWithFormat:@"%@/Applications/%@", appGroupFolder.path, selectedApp];
@@ -416,7 +418,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         return @"Container not found!";
     }
     
-    if(isLiveProcess && !isSideStore) {
+    if(isLiveProcess && !builtInAppIdentifier) {
         lcAppUrlScheme = [lcUserDefaults stringForKey:@"hostUrlScheme"];
         [lcUserDefaults removeObjectForKey:@"hostUrlScheme"];
     }
@@ -498,12 +500,12 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         }
     }
     
-    if(isSideStore) {
-        if(isLiveProcess) {
-            newHomePath = [lcUserDefaults stringForKey:@"specifiedSideStoreContainerPath"];;
+    if(builtInAppIdentifier) {
+        NSString *directory = [LCSharedUtils builtInApps][builtInAppIdentifier][@"directory"];
+        newHomePath = [docPath stringByAppendingPathComponent:directory];
+        if(isLiveProcess && isSideStore) {
+            newHomePath = [lcUserDefaults stringForKey:@"specifiedSideStoreContainerPath"] ?: newHomePath;
             [lcUserDefaults removeObjectForKey:@"specifiedSideStoreContainerPath"];
-        } else {
-            newHomePath = [docPath stringByAppendingPathComponent:@"SideStore"];
         }
     } else if (bookmarkURL) {
         newHomePath = bookmarkURL.path;
@@ -595,7 +597,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     if ([guestAppInfo[@"helperProcessesSupport"] boolValue]) {
         NSExtensionGuestHooksInit(appBundle.bundleURL, [NSURL fileURLWithPath:newHomePath isDirectory:YES]);
     }
-    if(!isSideStore) {
+    if(!builtInAppIdentifier) {
         SecItemGuestHooksInit();
         NSFMGuestHooksInit();
         initDead10ccFix();
@@ -606,7 +608,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // ignore setting handler from guest app
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, NSSetUncaughtExceptionHandler, hook_do_nothing, nil);
     
-    BOOL hookDlopen = !isSideStore && !isSharedBundle && LCSharedUtils.certificatePassword && isLiveProcess;
+    BOOL hookDlopen = !builtInAppIdentifier && !isSharedBundle && LCSharedUtils.certificatePassword && isLiveProcess;
     DyldHooksInit([guestAppInfo[@"hideLiveContainer"] boolValue], hookDlopen, [guestAppInfo[@"spoofSDKVersion"] unsignedIntValue]);
     
     if([guestContainerInfo[@"spoofIdentifierForVendor"] boolValue]) {
@@ -689,9 +691,10 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         }
     }
     
-    if(isSideStore) {
+    if(builtInAppIdentifier) {
         tweakLoaderLoaded = true;
-        dlopen([lcMainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/TweakLoader.dylib"].UTF8String, RTLD_LAZY|RTLD_GLOBAL);
+        NSURL *loader = [LCSharedUtils.hostAppBundle.bundleURL URLByAppendingPathComponent:@"Frameworks/TweakLoader.dylib"];
+        dlopen(loader.path.UTF8String, RTLD_LAZY|RTLD_GLOBAL);
     }
     
     if(sideStoreExist) {
@@ -701,6 +704,8 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
             dlopen([lcMainBundle.bundlePath stringByAppendingPathComponent:@"../../Frameworks/SideStoreSupport.framework/SideStoreSupport"].UTF8String, RTLD_LAZY);
         }
     }
+
+    if (builtInAppIdentifier && !isLiveProcess) [LCCompanionBridge installNavigationMenus];
     
     // Fix dynamic properties of some apps
     [NSUserDefaults performSelector:@selector(initialize)];
@@ -812,27 +817,29 @@ int LiveContainerMain(int argc, char *argv[]) {
     // in case some weird apps remove the tmp folder
     [NSFileManager.defaultManager createDirectoryAtPath:@(getenv("TMPDIR")) withIntermediateDirectories:YES attributes:nil error:nil];
     
-    if([selectedApp isEqualToString:@"ui"]) {
+    BOOL selectedMainUI = [selectedApp isEqualToString:@"ui"];
+    if(selectedMainUI) {
         selectedApp = nil;
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
     }
     
-    if(isLiveProcess) {
-        sideStoreExist = [NSFileManager.defaultManager fileExistsAtPath:[lcMainBundle.bundlePath stringByAppendingPathComponent:@"../../Frameworks/SideStoreApp.framework"]];
-    } else {
-        sideStoreExist = [NSFileManager.defaultManager fileExistsAtPath:[lcMainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/SideStoreApp.framework"]];
-    }
-
-    if([lcUserDefaults boolForKey:@"LCOpenSideStore"] || [selectedApp isEqualToString:@"builtinSideStore"]) {
-        if(sideStoreExist) {
-            isSideStore = true;
-        } else {
-            [lcUserDefaults setBool:NO forKey:@"LCOpenSideStore"];
+    sideStoreExist = [LCSharedUtils builtInAppExists:@"builtinSideStore"];
+    if (!selectedApp && !selectedMainUI && [lcUserDefaults boolForKey:@"LCOpenSideStore"]) selectedApp = @"builtinSideStore";
+    if (selectedApp.length && [LCSharedUtils builtInApps][selectedApp]) {
+        if (![LCSharedUtils builtInAppExists:selectedApp]) {
+            [lcUserDefaults setObject:@"内置应用文件缺失，请重新安装完整组合包。" forKey:@"error"];
+            [lcUserDefaults removeObjectForKey:@"selected"];
+            [lcUserDefaults removeObjectForKey:@"selectedContainer"];
+            [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
+            [lcUserDefaults removeObjectForKey:@"LCOpenSideStore"];
+            selectedApp = nil;
         }
+        builtInAppIdentifier = selectedApp;
+        isSideStore = [selectedApp isEqualToString:@"builtinSideStore"];
     }
     
-    if(selectedApp && !isSideStore && !selectedContainer) {
+    if(selectedApp && !builtInAppIdentifier && !selectedContainer) {
         selectedContainer = [LCSharedUtils findDefaultContainerWithBundleId:selectedApp];
     }
     NSString* runningLC = [LCSharedUtils getContainerUsingLCSchemeWithFolderName:selectedContainer];
@@ -848,6 +855,8 @@ int LiveContainerMain(int argc, char *argv[]) {
         
         NSString* selectedAppBackUp = selectedApp;
         selectedApp = nil;
+        builtInAppIdentifier = nil;
+        isSideStore = false;
         dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC));
         dispatch_after(delay, dispatch_get_main_queue(), ^{
             // Base64 encode the data
@@ -882,7 +891,7 @@ int LiveContainerMain(int argc, char *argv[]) {
 
     }
     NSSetUncaughtExceptionHandler(&exceptionHandler);
-    if (selectedApp || isSideStore) {
+    if (selectedApp || builtInAppIdentifier) {
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
         if(launchUrl) {
@@ -933,6 +942,7 @@ int LiveContainerMain(int argc, char *argv[]) {
     
     void *LiveContainerSwiftUIHandle = dlopen("@executable_path/Frameworks/LiveContainerSwiftUI.framework/LiveContainerSwiftUI", RTLD_LAZY);
     NSCAssert(LiveContainerSwiftUIHandle, @"%s", dlerror());
+    [LCCompanionBridge installNavigationMenus];
     
     if(sideStoreExist) {
         void* sideStoreHandle = dlopen("@executable_path/Frameworks/SideStoreSupport.framework/SideStoreSupport", RTLD_LAZY);

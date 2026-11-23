@@ -123,6 +123,7 @@ struct LCTabView: View {
         if LCSharedUtils.handleSideStoreCellularCallback(url) {
             return
         }
+        if LCCompanionBridge.handleCompanionURL(url) { return }
         repeat {
             if url.isFileURL {
                 sharedModel.selectedTab = .apps
