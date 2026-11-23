@@ -737,7 +737,9 @@ static void LCShowCompanionMessage(NSString *message) {
     NSString *shortName = NSUserDefaults.isSideStore ? @"SS ▾" : @"LC ▾";
     if ([NSUserDefaults.builtInAppIdentifier isEqualToString:@"builtinSideInstaller"]) shortName = @"SI ▾";
     UIImage *image = isRoot ? nil : [UIImage systemImageNamed:@"square.grid.2x2"];
-    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithTitle:isRoot ? shortName : nil image:image primaryAction:nil menu:[self navigationMenu]];
+    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithTitle:isRoot ? shortName : nil style:UIBarButtonItemStylePlain target:nil action:NULL];
+    switcher.image = image;
+    switcher.menu = [self navigationMenu];
     switcher.accessibilityIdentifier = LCCompanionMenuID;
     switcher.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
     item.leftBarButtonItems = isRoot ? [left arrayByAddingObject:switcher] : (left.count ? left : nil);
