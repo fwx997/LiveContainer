@@ -53,6 +53,7 @@ def merge_info(host, guest, update_url):
     host["NSSupportsLiveActivities"] = True
     host["MinimumOSVersion"] = minimum_version(host, guest)
     host["LCEmbeddedApps"] = ["SideStore", "SideInstaller"]
+    host["LCSideInstallerShortcutsVersion"] = 1
     host["LCCombinedUpdateURL"] = update_url
     host["LCCombinedSourceURL"] = urljoin(update_url, "source.json")
     return host

@@ -1,6 +1,7 @@
 """Verify full-app embedding, system declarations, and downgrade rejection."""
 
 from pathlib import Path
+import json
 import plistlib
 import sys
 import tempfile
@@ -10,7 +11,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from embed_sideinstaller import embed, merge_info
-from verify_ipa import verify_combined
+from verify_ipa import verify_combined, SIDEINSTALLER_ACTIONS
 from test_ipa_packaging import macho, write_bundle
 
 
@@ -40,6 +41,20 @@ class ThreeAppPackagingTests(unittest.TestCase):
         }
         (self.host / "Info.plist").write_bytes(plistlib.dumps(self.host_info))
         (self.host / "LiveContainer").write_bytes(macho(2))
+        shortcuts = self.host / "PlugIns/LaunchAppExtension.appex"
+        shortcuts.mkdir(parents=True)
+        (shortcuts / "Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleExecutable": "LaunchAppExtension",
+            "EXAppExtensionAttributes": {"EXExtensionPointIdentifier": "com.apple.appintents-extension"},
+        }))
+        (shortcuts / "LaunchAppExtension").write_bytes(macho(2))
+        metadata = shortcuts / "Metadata.appintents"
+        metadata.mkdir()
+        self.actions_path = metadata / "extract.actionsdata"
+        actions = {"SI" + name + "Intent": {"isDiscoverable": True, "openAppWhenRun": False,
+                   "fullyQualifiedTypeName": "LaunchAppExtension.SI" + name + "Intent"} for name in SIDEINSTALLER_ACTIONS}
+        self.actions_path.write_text(json.dumps({"actions": actions, "queries": {
+            "SISavedPlaceQuery": {}, "SISideloadedAppQuery": {}}}))
         self.installer = self.root / "SideInstaller.ipa"
         with zipfile.ZipFile(self.installer, "w") as archive:
             base = "Payload/SideInstaller.app/"
@@ -120,6 +135,18 @@ class ThreeAppPackagingTests(unittest.TestCase):
         for url in ("http://example.com/a.ipa", "https://user:password@example.com/a.ipa", "file:///a.ipa"):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 merge_info(dict(self.host_info), self.guest_info, url)
+
+    def test_missing_or_misrouted_shortcut_actions_are_rejected(self):
+        self.embed_installer()
+        metadata = json.loads(self.actions_path.read_text())
+        action = metadata["actions"].pop("SIRefreshAllAppsIntent")
+        self.actions_path.write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(ValueError, "shortcut actions are missing"):
+            verify_combined(self.package(), self.sidestore, self.installer)
+        metadata["actions"]["SIRefreshAllAppsIntent"] = dict(action, openAppWhenRun=True)
+        self.actions_path.write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(ValueError, "execute in the App Intents extension"):
+            verify_combined(self.package(), self.sidestore, self.installer)
 
 
 if __name__ == "__main__":

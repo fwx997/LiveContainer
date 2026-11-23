@@ -1,11 +1,45 @@
 """Reject incomplete SideStore conversions before publishing a combined IPA."""
 
 import argparse
+import json
 from pathlib import Path
 import plistlib
 import struct
 from urllib.parse import urlsplit
 import zipfile
+
+
+SIDEINSTALLER_ACTIONS = {
+    "GetSideloadedApps", "RefreshAllApps", "RefreshApp", "InstallApp", "InstallIPA", "InstallIPAFromURL",
+    "IsTunnelConnected", "ConnectLocalDevVPN", "GetPairingFile", "ImportPairingFile", "InstallPairingIntoApps",
+    "ShowDeveloperMode", "GetActivityLog", "SetLocation", "SetCoordinates", "SetSavedPlace", "ResetLocation",
+    "GetSpoofedLocation", "IsLocationSpoofed", "SavePlace", "DeleteSavedPlace", "PlayGPXRoute", "TravelToPlace", "StopRoute",
+}
+
+
+def verify_sideinstaller_shortcuts(archive, root):
+    extension = root + "/PlugIns/LaunchAppExtension.appex"
+    info, executable = bundle(archive, extension)
+    macho_commands(executable, 2)
+    if info.get("EXAppExtensionAttributes", {}).get("EXExtensionPointIdentifier") != "com.apple.appintents-extension":
+        raise ValueError("SideInstaller shortcuts require the native App Intents extension")
+    metadata = json.loads(read_required(archive, extension + "/Metadata.appintents/extract.actionsdata"))
+    actions = metadata.get("actions", {})
+    expected = {"SI" + name + "Intent" for name in SIDEINSTALLER_ACTIONS}
+    missing = expected - actions.keys()
+    if missing:
+        raise ValueError("SideInstaller shortcut actions are missing: " + ", ".join(sorted(missing)))
+    for name in expected:
+        action = actions[name]
+        if action.get("isDiscoverable") is False or action.get("openAppWhenRun") is True:
+            raise ValueError(name + " must be visible and execute in the App Intents extension")
+        if not action.get("fullyQualifiedTypeName", "").startswith("LaunchAppExtension."):
+            raise ValueError(name + " does not belong to the native shortcut extension")
+    encoded = json.dumps(metadata)
+    for query in ("SISavedPlaceQuery", "SISideloadedAppQuery"):
+        if query not in encoded:
+            raise ValueError("SideInstaller shortcut entity query is missing: " + query)
+    return len(expected)
 
 
 def macho_commands(data, filetype):
@@ -109,6 +143,8 @@ def verify_sideinstaller(combined, lc_root, lc_info, source_path):
     tasks = lc_info.get("BGTaskSchedulerPermittedIdentifiers", [])
     if lc_info["CFBundleIdentifier"] + ".install.*" not in tasks:
         raise ValueError("The host's background installation task is missing")
+    if lc_info.get("LCSideInstallerShortcutsVersion") == 1:
+        verify_sideinstaller_shortcuts(combined, lc_root)
 
 
 def verify_combined(combined_path, sidestore_path, sideinstaller_path=None):
