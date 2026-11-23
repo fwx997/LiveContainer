@@ -6,7 +6,7 @@ import Foundation
 enum SIShortcutClient {
     private static func configuration() throws -> (SIShortcutMailbox, String) {
         guard let host = LCSharedUtils.hostAppBundle(), let identifier = host.bundleIdentifier,
-              let group = LCSharedUtils.appGroupPath(), LCSharedUtils.builtInAppExists("builtinSideInstaller"),
+              let group = LCSharedUtils.appGroupPath(), LCSharedUtils.built(inAppExists: "builtinSideInstaller"),
               let types = host.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]],
               let scheme = types.flatMap({ $0["CFBundleURLSchemes"] as? [String] ?? [] }).first else {
             throw SIShortcutFailure("此动作需要完整三合一安装包及其快捷指令扩展，请保留全部扩展重新安装。")

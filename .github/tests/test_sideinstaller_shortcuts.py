@@ -46,7 +46,7 @@ final class HostBundle {
 @MainActor enum LCSharedUtils {
     static func hostAppBundle() -> HostBundle? { Fixture.hasHost ? Fixture.host : nil }
     static func appGroupPath() -> URL? { Fixture.hasGroup ? Fixture.group : nil }
-    static func builtInAppExists(_ identifier: String) -> Bool {
+    static func built(inAppExists identifier: String) -> Bool {
         Fixture.hasSideInstaller && identifier == "builtinSideInstaller"
     }
 }
@@ -226,7 +226,12 @@ SCENARIOS = r'''
                                           "enabled": true, "bundleIDs": ["com.example.one", "com.example.two"]]
         let result = try await SIShortcutClient.perform(action: "SetLocation", parameters: parameters)
         let input = Fixture.request["parameters"] as? [String: Any] ?? [:]
-        try require(NSDictionary(dictionary: input).isEqual(to: parameters), "Typed request parameters changed in transit")
+        try require(input["latitude"] as? Double == 31.2 && input["longitude"] as? Double == 121.5,
+                    "Coordinate values or types changed in transit")
+        try require(input["name"] as? String == "上海 & /?" && input["enabled"] as? Bool == true,
+                    "Text or Boolean parameters changed in transit")
+        try require(input["bundleIDs"] as? [String] == ["com.example.one", "com.example.two"] && input.count == 5,
+                    "Application list or parameter keys changed in transit")
         try require(Fixture.request["action"] as? String == "SetLocation", "The action changed in transit")
         try require(Fixture.request["hostBundleID"] as? String == "com.kdt.livecontainer2", "LC2 lost its identity")
         try require(Fixture.launchScheme == "livecontainer2", "The client opened the wrong installed LC")
