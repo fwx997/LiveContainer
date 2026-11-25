@@ -11,7 +11,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from embed_sideinstaller import embed, merge_info
-from verify_ipa import verify_combined, SIDEINSTALLER_ACTIONS
+from verify_ipa import verify_combined, verify_refresh_shortcuts, SIDEINSTALLER_ACTIONS
 from test_ipa_packaging import macho, write_bundle
 
 
@@ -147,6 +147,63 @@ class ThreeAppPackagingTests(unittest.TestCase):
         self.actions_path.write_text(json.dumps(metadata))
         with self.assertRaisesRegex(ValueError, "execute in the App Intents extension"):
             verify_combined(self.package(), self.sidestore, self.installer)
+
+
+class RefreshMetadataTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.path = Path(self.temporary.name) / "Combined.ipa"
+        self.actions = {}
+        self.source_actions = {}
+        definitions = {"RefreshAllIntent": ("20RefreshAllAppsIntentV", "returnErrorsAsResult", 1),
+                       "GetRefreshResultIntent": ("22GetRefreshResultIntentV", "requestID", 0)}
+        for key, (symbol, parameter, kind) in definitions.items():
+            self.actions[key] = {"mangledTypeNameV2": "16SideStoreSupport" + symbol,
+                                 "isDiscoverable": True, "openAppWhenRun": False,
+                                 "parameters": [{"name": parameter, "valueType": self.primitive(kind)}],
+                                 "outputType": self.primitive(0)}
+
+    @staticmethod
+    def primitive(kind):
+        return {"primitive": {"wrapper": {"typeIdentifier": kind}}}
+
+    def verify(self):
+        with zipfile.ZipFile(self.path, "w") as archive:
+            archive.writestr("Payload/LiveContainer.app/Metadata.appintents/extract.actionsdata",
+                             json.dumps({"actions": self.actions}))
+            archive.writestr("Payload/LiveContainer.app/Frameworks/SideStoreApp.framework/Metadata.appintents/extract.actionsdata",
+                             json.dumps({"actions": self.source_actions}))
+        with zipfile.ZipFile(self.path) as archive:
+            verify_refresh_shortcuts(archive, "Payload/LiveContainer.app")
+
+    def test_host_refresh_and_query_resolve_to_loaded_support(self):
+        self.verify()
+
+    def test_query_must_not_resolve_to_unloaded_sidestore(self):
+        self.actions["GetRefreshResultIntent"]["mangledTypeNameV2"] = "9SideStore22GetRefreshResultIntentV"
+        with self.assertRaisesRegex(ValueError, "host SideStoreSupport"):
+            self.verify()
+
+    def test_query_requires_text_request_and_output(self):
+        self.actions["GetRefreshResultIntent"]["outputType"] = self.primitive(1)
+        with self.assertRaisesRegex(ValueError, "text output"):
+            self.verify()
+
+    def test_error_result_parameter_must_survive_packaging(self):
+        self.actions["RefreshAllIntent"]["parameters"] = []
+        with self.assertRaisesRegex(ValueError, "refresh-result input"):
+            self.verify()
+
+    def test_older_packages_remain_verifiable(self):
+        self.actions = {}
+        self.verify()
+
+    def test_query_cannot_be_lost_from_new_host_metadata(self):
+        self.source_actions = self.actions
+        self.actions = {}
+        with self.assertRaisesRegex(ValueError, "missing SideStore's refresh-result query"):
+            self.verify()
 
 
 if __name__ == "__main__":

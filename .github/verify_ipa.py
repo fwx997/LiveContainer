@@ -42,6 +42,33 @@ def verify_sideinstaller_shortcuts(archive, root):
     return len(expected)
 
 
+def verify_refresh_shortcuts(archive, root):
+    name = root + "/Metadata.appintents/extract.actionsdata"
+    source_name = root + "/Frameworks/SideStoreApp.framework/Metadata.appintents/extract.actionsdata"
+    source_actions = json.loads(archive.read(source_name)).get("actions", {}) if source_name in archive.namelist() else {}
+    actions = json.loads(archive.read(name)).get("actions", {}) if name in archive.namelist() else {}
+    if "GetRefreshResultIntent" in source_actions and "GetRefreshResultIntent" not in actions:
+        raise ValueError("The host is missing SideStore's refresh-result query action")
+    if name not in archive.namelist():
+        return
+    if "GetRefreshResultIntent" not in actions:
+        return
+    expected = {"RefreshAllIntent": ("20RefreshAllAppsIntentV", "returnErrorsAsResult", 1),
+                "GetRefreshResultIntent": ("22GetRefreshResultIntentV", "requestID", 0)}
+    for identifier, (symbol, parameter, value_type) in expected.items():
+        action = actions.get(identifier, {})
+        mangled = action.get("mangledTypeNameV2") or action.get("mangledTypeName", "")
+        if mangled != "16SideStoreSupport" + symbol:
+            raise ValueError(identifier + " must resolve to the host SideStoreSupport implementation")
+        if action.get("isDiscoverable") is False or action.get("openAppWhenRun") is not False:
+            raise ValueError(identifier + " must remain available for background shortcuts")
+        parameters = {item["name"]: item for item in action.get("parameters", [])}
+        parameter_type = parameters.get(parameter, {}).get("valueType", {}).get("primitive", {}).get("wrapper", {})
+        output_type = action.get("outputType", {}).get("primitive", {}).get("wrapper", {})
+        if parameter_type.get("typeIdentifier") != value_type or output_type.get("typeIdentifier") != 0:
+            raise ValueError(identifier + " is missing its refresh-result input or text output")
+
+
 def macho_commands(data, filetype):
     if len(data) < 32:
         raise ValueError("Mach-O header is missing or truncated")
@@ -163,6 +190,7 @@ def verify_combined(combined_path, sidestore_path, sideinstaller_path=None):
             raise ValueError("Embedded Chinese strings do not match the source SideStore IPA")
         if not plistlib.loads(strings):
             raise ValueError("Embedded Chinese strings are empty")
+        verify_refresh_shortcuts(combined, lc_root)
         has_installer = lc_root + "/Frameworks/SideInstallerApp.framework/Info.plist" in combined.namelist()
         if sideinstaller_path is not None:
             verify_sideinstaller(combined, lc_root, lc_info, sideinstaller_path)
