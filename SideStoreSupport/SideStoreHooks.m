@@ -96,6 +96,10 @@ static id SSSceneObserver;
 @end
 
 NSURL* SideStoreSource_hook_altStoreSourceURL(id self, SEL cmd) {
+    NSString *configured = [NSUserDefaults.standardUserDefaults stringForKey:@"LCCombinedUpdateSourceURL"];
+    NSURL *configuredURL = configured.length ? [NSURL URLWithString:configured] : nil;
+    if ([configuredURL.scheme.lowercaseString isEqualToString:@"https"] && configuredURL.host.length &&
+        !configuredURL.user.length && !configuredURL.password.length && !configuredURL.fragment.length) return configuredURL;
     NSString *combinedSource = [LCSharedUtils.hostAppBundle objectForInfoDictionaryKey:@"LCCombinedSourceURL"];
     NSURL *combinedURL = combinedSource.length ? [NSURL URLWithString:combinedSource] : nil;
     if ([combinedURL.scheme.lowercaseString isEqualToString:@"https"] && combinedURL.host.length) return combinedURL;
