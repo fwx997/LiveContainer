@@ -1,6 +1,136 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Another refresh task is in progress. This request was not started. Keep the VPN connected until that task finishes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another refresh task is in progress. This request was not started. Keep the VPN connected until that task finishes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个续签任务仍在执行，本次请求未启动。请保持 VPN 连接，等待该任务结束。"
+          }
+        }
+      }
+    },
+    "Get Refresh Result": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get Refresh Result"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查询本次续签结果"
+          }
+        }
+      }
+    },
+    "Request ID": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request ID"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "续签请求 ID"
+          }
+        }
+      }
+    },
+    "Checks one refresh request without starting another refresh.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checks one refresh request without starting another refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按请求 ID 查询本次续签结果，不会再次发起续签。"
+          }
+        }
+      }
+    },
+    "Refresh is preparing or still running. Keep the VPN connected until its final result is available.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh is preparing or still running. Keep the VPN connected until its final result is available."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "续签正在准备或仍在执行。请保持 VPN 连接，等待本次续签的最终结果。"
+          }
+        }
+      }
+    },
+    "This refresh result is missing, expired or unavailable. Keep the VPN connected until you verify the result in SideStore.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This refresh result is missing, expired or unavailable. Keep the VPN connected until you verify the result in SideStore."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本次续签结果不存在、已过期或暂时无法读取。确认 SideStore 中的结果前，请保持 VPN 连接。"
+          }
+        }
+      }
+    },
+    "The refresh finished but its result could not be saved. Check SideStore before disconnecting the VPN.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The refresh finished but its result could not be saved. Check SideStore before disconnecting the VPN."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "续签已结束，但结果未能保存。请先在 SideStore 中确认结果，再断开 VPN。"
+          }
+        }
+      }
+    },
+    "Return Errors as Result": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Return Errors as Result" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "出错时返回结果" }
+        }
+      }
+    },
     "Another refresh task is in progress.": {
       "extractionState": "manual",
       "localizations": {
@@ -188,19 +318,19 @@
         }
       }
     },
-    "The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected and wait for SideStore's result notification.": {
+    "The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected. Query this request's result or check Refresh Attempts in SideStore.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected and wait for SideStore's result notification."
+            "value": "The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected. Query this request's result or check Refresh Attempts in SideStore."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "快捷指令已停止等待 SideStore，续签可能仍在后台进行。请保持本地 VPN 连接，等待 SideStore 的最终结果通知。"
+            "value": "快捷指令已停止等待 SideStore，续签可能仍在后台进行。请保持本地 VPN 连接，查询本次续签结果，或到 SideStore 的刷新尝试记录中查看最终结果。"
           }
         }
       }

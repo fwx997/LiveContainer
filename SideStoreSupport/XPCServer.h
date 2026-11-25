@@ -11,7 +11,7 @@
 __attribute__((swift_attr("@Sendable")))
 @protocol RefreshServer
 - (void)updateProgress:(double)value;
-- (void)finish:(NSString*)error requestIdentifier:(NSString*)requestIdentifier;
+- (void)finish:(NSError * _Nullable)error requestIdentifier:(NSString * _Nonnull)requestIdentifier;
 - (void)onConnection:(NSXPCConnection*)connection;
 - (void)finishedLaunching;
 - (void)addNotificationRequest:(UNNotificationRequest*)request;
@@ -36,6 +36,8 @@ NSData* bookmarkForURL(NSURL* url);
 
 void installSideStoreHooks(void);
 void installSideStoreNotificationHooks(void);
+
+NSProgress * _Nullable startSideStoreTrackedRefresh(NSString * _Nonnull requestIdentifier, void (^ _Nonnull completion)(NSError * _Nullable error));
 
 @interface SideStoreClient : NSObject<RefreshClient>
 @property (class, readonly) SideStoreClient* shared;

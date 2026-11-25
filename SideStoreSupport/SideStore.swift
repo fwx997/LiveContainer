@@ -10,12 +10,19 @@ import AppIntents
 import UserNotifications
 
 @available(iOS 17.0, *)
-func performIntentRefresh(identifier: String, mangledTypeName: String, intentProgress: Progress) async throws {
+func performIntentRefresh(identifier: String, mangledTypeName: String, intentProgress: Progress, requestID: String? = nil) async throws {
     intentProgress.totalUnitCount = 100
     if UserDefaults.isSideStore() {
-        try await SideStoreIntentCaller.shared.callRefreshIntent(mangledTypeName: mangledTypeName)
+        if let requestID {
+            try await SideStoreIntentCaller.shared.callTrackedRefresh(requestIdentifier: requestID, bounded: true) {
+                intentProgress.addChild($0, withPendingUnitCount: 100)
+            }
+        } else {
+            try await SideStoreIntentCaller.shared.callRefreshIntent(mangledTypeName: mangledTypeName)
+        }
     } else {
-        try await RefreshHandler.shared.startRefresh(identifier: identifier, mangledName: mangledTypeName, progress: intentProgress)
+        try await RefreshHandler.shared.startRefresh(identifier: identifier, mangledName: mangledTypeName,
+                                                     progress: intentProgress, requestID: requestID)
     }
 }
 
@@ -43,11 +50,16 @@ public struct RefreshAllAppsIntent: AppIntent, CustomIntentMigratedAppIntent, Pr
     
     public static var title: LocalizedStringResource = "Refresh All Apps"
     public static var description = IntentDescription("Refreshes your sideloaded apps to prevent them from expiring.")
+
+    @Parameter(title: "Return Errors as Result", default: false)
+    public var returnErrorsAsResult: Bool
     
     public init() {}
     
     public static var parameterSummary: some ParameterSummary {
-        Summary("Refresh All Apps")
+        Summary("Refresh All Apps") {
+            \.$returnErrorsAsResult
+        }
     }
     
     public static var predictionConfiguration: some IntentPredictionConfiguration {
@@ -59,12 +71,50 @@ public struct RefreshAllAppsIntent: AppIntent, CustomIntentMigratedAppIntent, Pr
         }
     }
     
-    public func perform() async throws -> some IntentResult & ProvidesDialog
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String>
     {
-        try await performIntentRefresh(identifier: "RefreshAllIntent", mangledTypeName: "9SideStore20RefreshAllAppsIntentV", intentProgress: progress)
-        return .result(dialog: "All apps have been refreshed.")
+        let requestID = UUID().uuidString
+        var store: ShortcutRefreshResultStore?
+        do {
+            let currentStore = try ShortcutRefreshEnvironment.store()
+            try currentStore.begin(requestID: requestID, message: ShortcutRefreshResult.localized("Refresh is preparing or still running. Keep the VPN connected until its final result is available."))
+            store = currentStore
+            try await performIntentRefresh(identifier: "RefreshAllIntent", mangledTypeName: "9SideStore20RefreshAllAppsIntentV",
+                                           intentProgress: progress, requestID: requestID)
+            let result = try currentStore.query(requestID: requestID).checkedForShortcut(returnErrorsAsResult: returnErrorsAsResult)
+            return .result(value: result.json, dialog: "\(result.message)")
+        } catch {
+            try Task.checkCancellation()
+            if error is CancellationError { throw error }
+            var result = ShortcutRefreshResult.failure(error, requestID: requestID)
+            try? store?.finish(result)
+            if let saved = store?.query(requestID: requestID), saved.isTerminal { result = saved }
+            result = try result.checkedForShortcut(returnErrorsAsResult: returnErrorsAsResult)
+            return .result(value: result.json, dialog: "\(result.message)")
+        }
     }
     
+}
+
+@available(iOS 17.0, *)
+public struct GetRefreshResultIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Get Refresh Result"
+    public static var description = IntentDescription("Checks one refresh request without starting another refresh.")
+    public static var openAppWhenRun = false
+
+    @Parameter(title: "Request ID")
+    public var requestID: String
+
+    public init() {}
+
+    public static var parameterSummary: some ParameterSummary { Summary("Get refresh result for \(\.$requestID)") }
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
+        let result: ShortcutRefreshResult
+        do { result = try ShortcutRefreshEnvironment.store().query(requestID: requestID) }
+        catch { result = .unknown(requestID: requestID, message: error.localizedDescription) }
+        return .result(value: result.json, dialog: "\(result.message)")
+    }
 }
 
 
@@ -112,8 +162,9 @@ final class RefreshCompletion: @unchecked Sendable {
     }
 }
 
-private func refreshError(_ message: String) -> NSError {
+private func refreshError(_ message: String, pending: Bool = false) -> NSError {
     let description = Bundle(for: RefreshHandler.self).localizedString(forKey: message, value: message, table: nil)
+    if pending { return ShortcutRefreshResult.pendingError(message: description) }
     return NSError(domain: "SideStore", code: 1, userInfo: [NSLocalizedDescriptionKey: description])
 }
 
@@ -153,7 +204,7 @@ class RefreshHandler: NSObject, RefreshServer {
         }
     }
     
-    func startRefresh(identifier: String, mangledName: String, progress: Progress) async throws {
+    func startRefresh(identifier: String, mangledName: String, progress: Progress, requestID: String? = nil) async throws {
         // Leave headroom for the system's background intent budget, including cold
         // startup. iOS can still suspend or cancel an intent sooner than this.
         let deadline = DispatchTime.now() + 27
@@ -161,9 +212,9 @@ class RefreshHandler: NSObject, RefreshServer {
             failRefresh(refreshError("Built-in SideStore quit unexpectedly"))
         }
         guard requestIdentifier == nil else {
-            throw refreshError("Another refresh task is in progress.")
+            throw refreshError("Another refresh task is in progress. This request was not started. Keep the VPN connected until that task finishes.", pending: true)
         }
-        let requestIdentifier = UUID().uuidString
+        let requestIdentifier = requestID ?? UUID().uuidString
         self.requestIdentifier = requestIdentifier
         self.progress = progress
         let completion = RefreshCompletion()
@@ -299,8 +350,8 @@ class RefreshHandler: NSObject, RefreshServer {
         guard self.requestIdentifier == requestIdentifier else { return }
         if didDispatchRefresh {
             // Ending the shortcut's wait must not kill the already dispatched
-            // operation. SideStore owns its final result notification and cleanup.
-            let error: Error = cancellation ? CancellationError() : refreshError("The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected and wait for SideStore's result notification.")
+            // operation. SideStore owns the operation and its durable final receipt.
+            let error: Error = cancellation ? CancellationError() : refreshError("The shortcut stopped waiting for SideStore. Refresh may still be running in the background. Keep the local VPN connected. Query this request's result or check Refresh Attempts in SideStore.", pending: true)
             completion?.finish(.failure(error))
             return
         }
@@ -336,8 +387,9 @@ class RefreshHandler: NSObject, RefreshServer {
     }
 
     private func failRefresh(_ error: Error) {
-        launchCompletion?.finish(.failure(error))
-        completion?.finish(.failure(error))
+        let reported: Error = didDispatchRefresh ? ShortcutRefreshResult.pendingError(message: error.localizedDescription) : error
+        launchCompletion?.finish(.failure(reported))
+        completion?.finish(.failure(reported))
         launchCompletion = nil
         didDispatchRefresh = false
         if completion == nil {
@@ -354,10 +406,10 @@ class RefreshHandler: NSObject, RefreshServer {
         }
     }
 
-    nonisolated func finish(_ error: String?, requestIdentifier: String) {
+    nonisolated func finish(_ error: Error?, requestIdentifier: String) {
         Task { @MainActor in
             guard self.requestIdentifier == requestIdentifier else { return }
-            let result: Result<Void, Error> = error.map { .failure(refreshError($0)) } ?? .success(())
+            let result: Result<Void, Error> = error.map { .failure($0) } ?? .success(())
             self.completion?.finish(result)
             self.didDispatchRefresh = false
             self.requestIdentifier = nil

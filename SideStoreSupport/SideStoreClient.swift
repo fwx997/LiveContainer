@@ -52,6 +52,38 @@ private func resolveType(_ mangledTypeName: String) throws -> any Any.Type {
 @available(iOS 17.0, *)
 struct SideStoreIntentCaller {
     static let shared = SideStoreIntentCaller()
+
+    func callTrackedRefresh(requestIdentifier: String, bounded: Bool = false,
+                            progressCallback: (Progress) -> Void) async throws {
+        let completion = RefreshCompletion()
+        let timer: Task<Void, Never>? = bounded ? Task {
+            do { try await Task.sleep(nanoseconds: 27_000_000_000) }
+            catch { return }
+            completion.finish(.failure(ShortcutRefreshResult.pendingError(message: ShortcutRefreshResult.localized("Refresh is preparing or still running. Keep the VPN connected until its final result is available."))))
+        } : nil
+        defer { timer?.cancel() }
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await completion.wait {
+                let progress = startSideStoreTrackedRefresh(requestIdentifier) { error in
+                    completion.finish(error.map { .failure($0) } ?? .success(()))
+                }
+                if let progress { progressCallback(progress) }
+            }
+        } onCancel: {
+            // The app's execution and durable receipt outlive this observer.
+            completion.finish(.failure(CancellationError()))
+        }
+    }
+
+    func callRequestedRefresh(identifier: String, mangledTypeName: String, requestIdentifier: String,
+                              progressCallback: (Progress) -> Void) async throws {
+        if identifier == "RefreshAllIntent" {
+            try await callTrackedRefresh(requestIdentifier: requestIdentifier, progressCallback: progressCallback)
+        } else {
+            try await callRefreshIntent2(identifier: identifier, mangledTypeName: mangledTypeName, progressCallback: progressCallback)
+        }
+    }
     
     // call this when a IntentContext already exists (when sidestore is loaded in LiveContainer itself)
     func callRefreshIntent(mangledTypeName: String) async throws {
@@ -95,12 +127,13 @@ struct SideStoreIntentCaller {
             var obs: NSKeyValueObservation? = nil
             defer { obs?.invalidate() }
             do {
-                try await SideStoreIntentCaller.shared.callRefreshIntent2(identifier: identifier, mangledTypeName: mangledTypeName) { progress in
+                try await SideStoreIntentCaller.shared.callRequestedRefresh(identifier: identifier, mangledTypeName: mangledTypeName,
+                                                                           requestIdentifier: requestIdentifier) { progress in
                     obs = observeRefreshProgress(progress, server: server)
                 }
                 server.finish(nil, requestIdentifier: requestIdentifier)
             } catch {
-                server.finish(error.localizedDescription, requestIdentifier: requestIdentifier)
+                server.finish(ShortcutRefreshResult.transportError(error), requestIdentifier: requestIdentifier)
             }
         }
     }

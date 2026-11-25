@@ -33,7 +33,11 @@ def production_coordinator():
     for original, replacement in substitutions.items():
         source = source.replace(original, replacement)
     source = re.sub(r"\bBundle(?=\s*\()", "FakeBundle", source)
-    return source
+    outcome = (ROOT / "SideStoreSupport/ShortcutRefreshResult.swift").read_text(encoding="utf-8")
+    client = (ROOT / "SideStoreSupport/SideStoreClient.swift").read_text(encoding="utf-8")
+    tracked = production_method(client, "    func callTrackedRefresh(")
+    tracked = tracked.replace("27_000_000_000", "30_000_000")
+    return outcome + "\n" + source + "\nstruct TrackedIntentCaller {\n" + tracked + "\n}\n"
 
 
 def production_method(source, signature):
@@ -76,7 +80,7 @@ class BackgroundRefreshTests(unittest.TestCase):
 
     def test_english_and_chinese_error_resources(self):
         catalog = json.loads((ROOT / "SideStoreSupport/Localizable.xcstrings").read_text(encoding="utf-8"))
-        messages = set(re.findall(r'refreshError\("([^"\\]+)"\)', SOURCE.read_text(encoding="utf-8")))
+        messages = set(re.findall(r'refreshError\("([^"\\]+)"(?:, pending: true)?\)', SOURCE.read_text(encoding="utf-8")))
         self.assertGreater(len(messages), 5)
         for message in messages:
             translations = catalog["strings"][message]["localizations"]

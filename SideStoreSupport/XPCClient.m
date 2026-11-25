@@ -22,6 +22,18 @@
 static LiveProcessSideStoreHandler* handler = nil;
 void installSideStoreHooks(void);
 
+NSProgress *startSideStoreTrackedRefresh(NSString *requestIdentifier, void (^completion)(NSError *error)) {
+    Class bridge = NSClassFromString(@"SSBackgroundRefreshBridge");
+    SEL selector = NSSelectorFromString(@"startRefreshWithRequestIdentifier:completion:");
+    if ([bridge respondsToSelector:selector]) {
+        typedef NSProgress *(*StartRefresh)(id, SEL, NSString *, void (^)(NSError *));
+        return ((StartRefresh)objc_msgSend)(bridge, selector, requestIdentifier, completion);
+    }
+    completion([NSError errorWithDomain:@"SideStore.ShortcutRefreshBridge" code:1
+                              userInfo:@{NSLocalizedDescriptionKey: @"The built-in SideStore refresh bridge is missing. Reinstall the complete updated package. No refresh was started."}]);
+    return nil;
+}
+
 @implementation SideStoreClient
 
 + (SideStoreClient*)shared {

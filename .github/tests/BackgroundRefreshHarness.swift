@@ -2,7 +2,7 @@ import Foundation
 
 protocol RefreshServer: AnyObject {
     func updateProgress(_ value: Double)
-    func finish(_ error: String?, requestIdentifier: String)
+    func finish(_ error: Error?, requestIdentifier: String)
     func onConnection(_ connection: FakeConnection!)
     func finishedLaunching()
 }
@@ -36,6 +36,10 @@ enum Fixture {
     static var scheduledDeadlines = 0
     static var deadlinePrecededLaunch = false
     static var deadlineAction: (() -> Void)?
+    static var trackedCallback: ((NSError?) -> Void)?
+    static var trackedRequestID: String?
+    static var trackedStarts = 0
+    static var trackedFinishImmediately = false
 
     static func scheduleDeadline(deadline: DispatchTime, execute: @escaping () -> Void) {
         scheduledDeadlines += 1
@@ -66,7 +70,21 @@ enum Fixture {
         scheduledDeadlines = 0
         deadlinePrecededLaunch = false
         deadlineAction = nil
+        trackedCallback = nil
+        trackedRequestID = nil
+        trackedStarts = 0
+        trackedFinishImmediately = false
     }
+}
+
+func startSideStoreTrackedRefresh(_ identifier: String, _ completion: @escaping (NSError?) -> Void) -> Progress? {
+    Task { @MainActor in
+        Fixture.trackedStarts += 1
+        Fixture.trackedRequestID = identifier
+        Fixture.trackedCallback = completion
+        if Fixture.trackedFinishImmediately { completion(nil) }
+    }
+    return Progress(totalUnitCount: 1)
 }
 
 final class FakeBundle {
@@ -289,6 +307,8 @@ enum Regression {
             fatalError("Concurrent refresh was accepted")
         } catch {
             require(error.localizedDescription.contains("Another refresh"), "Wrong busy error")
+            require(!ShortcutRefreshResult.failure(error, requestID: UUID().uuidString).canDisconnectVPN,
+                    "Busy response permitted disconnecting another operation's VPN")
         }
         handler.finish(nil, requestIdentifier: Fixture.requests[1])
         try await pending.value
@@ -334,6 +354,10 @@ enum Regression {
             fatalError("The intent deadline did not detach its waiter")
         } catch {
             require(error.localizedDescription.contains("may still be running"), "Unexpected deadline error: \(error)")
+            require(error.localizedDescription.contains("Query this request's result"), "Deadline did not explain how to obtain the final result")
+            require(!error.localizedDescription.contains("result notification"), "Deadline promised a disabled notification")
+            require(!ShortcutRefreshResult.failure(error, requestID: Fixture.requests[0]).canDisconnectVPN,
+                    "A deadline was treated as a completed refresh failure")
         }
         require(Fixture.requests.count == 1, "Expected one dispatched operation")
         require(Fixture.extensionKilled == 0 && handler.client != nil, "Deadline killed the dispatched operation")
@@ -376,6 +400,54 @@ enum Regression {
     }
 
     @MainActor
+    static func trackedCallerRegressions() async throws {
+        Fixture.reset()
+        let id = UUID().uuidString
+        Fixture.trackedFinishImmediately = true
+        try await TrackedIntentCaller().callTrackedRefresh(requestIdentifier: id, bounded: true) { _ in }
+        require(Fixture.trackedStarts == 1 && Fixture.trackedRequestID == id, "Tracked bridge lost the request ID")
+        Fixture.reset()
+        do {
+            try await TrackedIntentCaller().callTrackedRefresh(requestIdentifier: id, bounded: true) { _ in }
+            fatalError("A pending tracked refresh returned success")
+        } catch {
+            let output = ShortcutRefreshResult.failure(error, requestID: id)
+            require(output.status == "pending" && !output.canDisconnectVPN, "Tracked deadline allowed unsafe cleanup")
+        }
+        require(Fixture.trackedStarts == 1, "Timeout started a second operation")
+        Fixture.trackedCallback?(NSError(domain: "test", code: 4))
+        Fixture.reset()
+        let cancelled = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await TrackedIntentCaller().callTrackedRefresh(requestIdentifier: id, bounded: true) { _ in }
+        }
+        do { try await cancelled.value; fatalError("Cancelled tracked caller returned success") }
+        catch is CancellationError { }
+        require(Fixture.trackedStarts == 0, "Cancelled caller started a refresh")
+    }
+
+    @MainActor
+    static func typedReplyRegression() async throws {
+        Fixture.reset()
+        Fixture.finishImmediately = false
+        let handler = RefreshHandler()
+        let id = UUID().uuidString
+        let pending = Task { @MainActor in
+            try await handler.startRefresh(identifier: "RefreshAllIntent", mangledName: "test",
+                                           progress: Progress(totalUnitCount: 1), requestID: id)
+        }
+        while Fixture.requests.isEmpty { await Task.yield() }
+        require(Fixture.requests[0] == id, "Host replaced the caller's receipt ID")
+        handler.finish(NSError(domain: "test.finished", code: 9, userInfo: [NSLocalizedDescriptionKey: "paired device unavailable"]), requestIdentifier: id)
+        do { try await pending.value; fatalError("Typed failure returned success") }
+        catch {
+            let output = ShortcutRefreshResult.failure(error, requestID: id)
+            require(output.status == "failed" && output.canDisconnectVPN, "Completed error prevented cleanup")
+            require((error as NSError).domain == "test.finished", "XPC lost the original error domain")
+        }
+    }
+
+    @MainActor
     static func main() async throws {
         setenv("LC_HOME_PATH", "/tmp", 1)
         try await completionRegressions()
@@ -384,6 +456,8 @@ enum Regression {
         try await cancellationRegression()
         try await deadlineRegression()
         try await dispatchedCancellationRegression()
+        try await trackedCallerRegressions()
+        try await typedReplyRegression()
         print("Refresh lifecycle regressions passed")
     }
 }
