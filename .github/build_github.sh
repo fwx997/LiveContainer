@@ -87,6 +87,9 @@ mv ./Payload/LiveContainer.app/PlugIns/LiveWidgetExtension.appex/AltWidgetExtens
 # The optional third application is compiled independently, then converted just
 # like SideStore. Its extension and system declarations belong to the host.
 if [ -n "${SIDEINSTALLER_IPA_PATH:-}" ]; then
+    # Keep a standard PNG for the update feed alongside the iOS-optimized icons.
+    sips -z 256 256 Resources/Assets.xcassets/AppIcon.appiconset/AppIcon1024.png \
+        --out Payload/LiveContainer.app/LiveContainerIcon.png >/dev/null
     python3 .github/embed_sideinstaller.py "$SIDEINSTALLER_IPA_PATH" Payload/LiveContainer.app \
         --converter ./dylibify --update-url "$LC_COMBINED_UPDATE_URL" \
         --license "$SIDEINSTALLER_LICENSE_PATH"
