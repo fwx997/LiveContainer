@@ -120,6 +120,20 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         _installOptions = State(initialValue: [])
     }
     
+    private var installMenu: some View {
+        Menu {
+            Button("lc.appList.installFromIpa".loc, systemImage: "doc.badge.plus") {
+                choosingIPA = true
+            }
+            Button("lc.appList.installFromUrl".loc, systemImage: "link.badge.plus") {
+                Task { await startInstallFromUrl() }
+            }
+        } label: {
+            Label("lc.appList.installation".loc, systemImage: "plus")
+        }
+        .accessibilityIdentifier("lc.appList.install")
+    }
+
     var body: some View {
         NavigationView {
             ScrollView {
@@ -215,33 +229,14 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if sharedModel.multiLCStatus != 2 {
-                        if !installprogressVisible {
-                            Menu {
-                                
-                                Button("lc.appList.installFromIpa".loc, systemImage: "doc.badge.plus", action: {
-                                    choosingIPA = true
-                                })
-                                Button("lc.appList.installFromUrl".loc, systemImage: "link.badge.plus", action: {
-                                    Task{ await startInstallFromUrl() }
-                                })
-                            } label: {
-                                Label("add", systemImage: "plus")
-                            }
-                            
-                        } else {
+                        if installprogressVisible {
                             ProgressView().progressViewStyle(.circular).padding(.horizontal, 8)
+                        } else {
+                            installMenu
                         }
                     }
                 }
-                ToolbarItem(placement: .topBarLeading) {
-                    if LCCompanionBridge.availableApps().count < 2 {
-                        Button("Help", systemImage: "questionmark") {
-                            helpPresent = true
-                        }
-                    }
-                    
-
-                }
+                LCCompanionToolbarItem { helpPresent = true }
                 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("lc.appList.openLink".loc, systemImage: "link", action: {

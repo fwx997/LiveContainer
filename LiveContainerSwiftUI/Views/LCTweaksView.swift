@@ -398,6 +398,7 @@ struct LCTweaksView: View {
     var body: some View {
         NavigationView {
             LCTweakFolderView(baseUrl: LCPath.tweakPath, isRoot: true)
+                .toolbar { LCCompanionToolbarItem() }
         }
         .navigationViewStyle(StackNavigationViewStyle())
 

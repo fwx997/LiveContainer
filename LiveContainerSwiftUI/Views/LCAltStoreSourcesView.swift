@@ -554,6 +554,7 @@ struct LCSourcesView: View {
                         }
                     }
                 }
+                LCCompanionToolbarItem()
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("lc.sources.addSource".loc, systemImage: "plus") {
                         isManagingSources = true

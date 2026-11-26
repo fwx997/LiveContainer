@@ -727,6 +727,8 @@ static void LCShowCompanionMessage(NSString *message) {
     UIViewController *top = navigation.topViewController;
     if (!top || top.presentedViewController) return;
     BOOL isRoot = navigation.viewControllers.firstObject == top;
+    // The host tabs compose the switcher with their own SwiftUI toolbar items.
+    if (isRoot && !NSUserDefaults.builtInAppIdentifier) return;
     UINavigationItem *item = top.navigationItem;
     NSArray *expectedItems = isRoot ? item.leftBarButtonItems : item.rightBarButtonItems;
     for (UIBarButtonItem *existing in expectedItems) {
@@ -742,8 +744,12 @@ static void LCShowCompanionMessage(NSString *message) {
     switcher.menu = [self navigationMenu];
     switcher.accessibilityIdentifier = LCCompanionMenuID;
     switcher.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
-    item.leftBarButtonItems = isRoot ? [left arrayByAddingObject:switcher] : (left.count ? left : nil);
-    item.rightBarButtonItems = isRoot ? right : [right arrayByAddingObject:switcher];
+    if (isRoot || left.count != item.leftBarButtonItems.count) {
+        item.leftBarButtonItems = isRoot ? [left arrayByAddingObject:switcher] : left;
+    }
+    if (!isRoot || right.count != item.rightBarButtonItems.count) {
+        item.rightBarButtonItems = isRoot ? right : [right arrayByAddingObject:switcher];
+    }
 }
 
 + (void)installNavigationMenus {

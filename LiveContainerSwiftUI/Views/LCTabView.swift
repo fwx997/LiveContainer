@@ -8,6 +8,34 @@
 import Foundation
 import SwiftUI
 
+private struct LCCompanionMenuButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle("LC ▾", for: .normal)
+        button.menu = LCCompanionBridge.navigationMenu()
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityLabel = "切换 LiveContainer、SideStore 或 SideInstaller"
+        button.accessibilityIdentifier = "lc.companion.switch"
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {}
+}
+
+struct LCCompanionToolbarItem: ToolbarContent {
+    var showHelp: (() -> Void)? = nil
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            if LCCompanionBridge.availableApps().count > 1 {
+                LCCompanionMenuButton().fixedSize()
+            } else if let showHelp {
+                Button("Help", systemImage: "questionmark", action: showHelp)
+            }
+        }
+    }
+}
+
 struct LCTabView: View {
     @State var errorShow = false
     @State var crashReportShow = false

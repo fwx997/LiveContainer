@@ -378,6 +378,7 @@ struct LCSettingsView: View {
                 }
             }
             .navigationBarTitle("lc.tabView.settings".loc)
+            .toolbar { LCCompanionToolbarItem() }
             .alert("lc.common.error".loc, isPresented: $errorShow){
             } message: {
                 Text(errorInfo)
