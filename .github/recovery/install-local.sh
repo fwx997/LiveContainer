@@ -30,6 +30,8 @@ for abandoned in "$state"/recovery-work/import.*; do
 done
 work=$(mktemp -d "$state/recovery-work/import.XXXXXX")
 printf '%s\n' "$$" > "$work/owner.pid"
+cp "$archive" "$work/archive.zip"
+archive="$work/archive.zip"
 for name in install.sh SHA256SUMS assets/LiveContainer+SideStore+SideInstaller.ipa; do
   mkdir -p "$work/$(dirname -- "$name")"
   unzip -p "$archive" "siboot-local/$name" > "$work/$name" || fail 'The local recovery ZIP is incomplete.'

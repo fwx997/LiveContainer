@@ -294,8 +294,26 @@ static BOOL LCRecoveryPublish(NSURL *stage, NSURL *directory, NSError **error) {
     return success;
 }
 
-static BOOL LCRecoverySave(NSURL *root, NSError **error) {
-    if (!LCRecoveryEnsureCache(root, error)) return NO;
+static BOOL LCRecoveryValidateAutomaticCache(NSURL *root, NSString *expectedBuild, NSError **error) {
+    NSURL *cache = [root URLByAppendingPathComponent:@"cache" isDirectory:YES];
+    NSDictionary *receipt = LCRecoveryReadJSON([cache URLByAppendingPathComponent:@"receipt.json"]);
+    id cachedBuild = receipt[@"build"];
+    if (!LCRecoveryValidBuild(expectedBuild) || ![cachedBuild isKindOfClass:NSString.class] || ![cachedBuild isEqualToString:expectedBuild]) {
+        if (error) *error = LCRecoveryError(@"本次更新的备份缓存已变化，自动保存未完成，原恢复包未被替换。");
+        return NO;
+    }
+    NSString *expectedHash = receipt[@"ipaSHA256"];
+    NSString *actualHash = LCRecoveryHash([cache URLByAppendingPathComponent:LCRecoveryIPA], error);
+    if (![expectedHash isKindOfClass:NSString.class] || expectedHash.length != 64 || ![expectedHash isEqualToString:actualHash]) {
+        if (error && !*error) *error = LCRecoveryError(@"本次更新的备份缓存校验失败，原恢复包未被替换。");
+        return NO;
+    }
+    return YES;
+}
+
+static BOOL LCRecoverySave(NSURL *root, NSString *expectedBuild, NSError **error) {
+    BOOL valid = expectedBuild ? LCRecoveryValidateAutomaticCache(root, expectedBuild, error) : LCRecoveryEnsureCache(root, error);
+    if (!valid) return NO;
     NSURL *directory = LCRecoveryResolveDirectory(error);
     if (!directory) return NO;
     NSFileManager *manager = NSFileManager.defaultManager;
@@ -398,18 +416,25 @@ static BOOL LCRecoveryPerform(BOOL (^operation)(NSURL *, NSError **), NSError **
     dispatch_async(LCRecoveryQueue(), ^{
         @synchronized (self) { LCRecoveryBusy = YES; }
         NSError *failure;
-        LCRecoveryPerform(^BOOL(NSURL *root, NSError **error) { return LCRecoverySave(root, error); }, &failure);
+        LCRecoveryPerform(^BOOL(NSURL *root, NSError **error) { return LCRecoverySave(root, nil, error); }, &failure);
         @synchronized (self) { LCRecoveryBusy = NO; }
         dispatch_async(dispatch_get_main_queue(), ^{ completion(failure); });
     });
 }
 
-+ (void)saveAutomaticallyWithCompletion:(void (^)(NSError *))completion {
++ (void)saveAutomaticallyForBuild:(NSString *)build completion:(void (^)(NSError *))completion {
     NSUserDefaults *defaults = LCRecoveryDefaults();
     if (![defaults boolForKey:LCRecoveryAutomaticKey] || ![defaults dataForKey:LCRecoveryBookmarkKey]) {
         dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
         return;
     }
-    [self saveWithCompletion:completion];
+    NSString *expectedBuild = [build isKindOfClass:NSString.class] ? [build copy] : @"";
+    dispatch_async(LCRecoveryQueue(), ^{
+        @synchronized (self) { LCRecoveryBusy = YES; }
+        NSError *failure;
+        LCRecoveryPerform(^BOOL(NSURL *root, NSError **error) { return LCRecoverySave(root, expectedBuild, error); }, &failure);
+        @synchronized (self) { LCRecoveryBusy = NO; }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(failure); });
+    });
 }
 @end

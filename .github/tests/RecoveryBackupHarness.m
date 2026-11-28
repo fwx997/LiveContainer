@@ -85,6 +85,31 @@ static void sanitationScenarios(void) {
     expect([info[@"CFBundleVersion"] isEqualToString:@"7"], @"keep version metadata");
 }
 
+static void automaticCacheScenarios(void) {
+    NSError *error = nil;
+    NSURL *root = LCRecoveryRoot(&error);
+    NSURL *cache = [root URLByAppendingPathComponent:@"cache" isDirectory:YES];
+    NSURL *exported = fixture(@"ExistingExport/livecontainer/LiveContainer-triple-local.zip");
+    fixtureWrite(@"last complete recovery package", exported);
+    NSData *bookmark = [exported.URLByDeletingLastPathComponent bookmarkDataWithOptions:0 includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+    expect(bookmark != nil, @"configure existing recovery folder");
+    [LCRecoveryDefaults() setObject:bookmark forKey:LCRecoveryBookmarkKey];
+    NSString *original = LCRecoveryHash(exported, nil);
+    expect(LCRecoveryValidateAutomaticCache(root, @"20261128.88", &error), @"accept this update's intact cached package");
+    expect(!LCRecoverySave(root, @"20261128.89", &error), @"reject another update's cached build before export");
+    expect([error.localizedDescription containsString:@"备份缓存已变化"], @"reject precisely the build mismatch");
+    expect([original isEqualToString:LCRecoveryHash(exported, nil)], @"wrong build does not replace existing export");
+    fixtureWrite(@"damaged IPA", [cache URLByAppendingPathComponent:LCRecoveryIPA]);
+    error = nil;
+    expect(!LCRecoverySave(root, @"20261128.88", &error), @"corrupt automatic cache never falls back to installed bundle");
+    expect([error.localizedDescription containsString:@"备份缓存校验失败"], @"report corruption rather than trying installed fallback");
+    expect([original isEqualToString:LCRecoveryHash(exported, nil)], @"damaged cache leaves previous recovery untouched");
+    expect([LCRecoveryHash([cache URLByAppendingPathComponent:LCRecoveryIPA], nil) isEqualToString:LCRecoveryHash(fixture(@"download.ipa"), nil)] == NO,
+        @"failed auto-save did not replace the damaged cache with another input");
+    error = nil;
+    expect(LCRecoveryCache(fixture(@"download.ipa"), TestBundle.bundleURL, root, &error), @"later verified download repairs cache");
+}
+
 static void publicationScenarios(void) {
     NSURL *stage = fixture(@"Export");
     NSURL *destination = fixture(@"External/livecontainer");
@@ -116,6 +141,7 @@ int main(int argc, char **argv) {
         TestDefaults = [@"com.livecontainer.recovery-tests." stringByAppendingString:NSUUID.UUID.UUIDString];
         makeBundle();
         cacheScenarios();
+        automaticCacheScenarios();
         sanitationScenarios();
         publicationScenarios();
         [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:TestDefaults];

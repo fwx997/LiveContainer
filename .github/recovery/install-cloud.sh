@@ -7,6 +7,7 @@ MIRRORS="${SIBOOT_MIRRORS-__SIBOOT_SECONDARY__}"
 EXPECTED='__SIBOOT_PACKAGE_SHA256__'
 ENTRY_EXPECTED='__SIBOOT_LOCAL_ENTRY_SHA256__'
 IPA_EXPECTED='__SIBOOT_IPA_SHA256__'
+INSTALLER_EXPECTED='__SIBOOT_INSTALLER_SHA256__'
 BUILD='__SIBOOT_BUILD__'
 ARCHIVE='LiveContainer-triple-local.zip'
 PACKAGE_DIR="${SIBOOT_PACKAGE_DIR:-/var/minis/mounts/livecontainer}"
@@ -53,6 +54,14 @@ download() {
   done
   return 1
 }
+verified_local_zip() {
+  [ -f "$PACKAGE_DIR/$ARCHIVE" ] || return 1
+  cp "$PACKAGE_DIR/$ARCHIVE" "$stage/$ARCHIVE" || return 1
+  unzip -p "$stage/$ARCHIVE" 'siboot-local/assets/LiveContainer+SideStore+SideInstaller.ipa' > "$stage/local-ipa" || return 1
+  unzip -p "$stage/$ARCHIVE" siboot-local/install.sh > "$stage/local-installer" || return 1
+  unzip -p "$stage/$ARCHIVE" siboot-local/install-local.sh > "$stage/local-entry" || return 1
+  matches "$stage/local-ipa" "$IPA_EXPECTED" && matches "$stage/local-installer" "$INSTALLER_EXPECTED" && matches "$stage/local-entry" "$ENTRY_EXPECTED"
+}
 stage="$PACKAGE_DIR/.livecontainer-pending-cloud"
 [ ! -L "$stage" ] || fail 'The pending recovery directory cannot be a symlink.'
 [ ! -e "$stage" ] || rm -rf "$stage"
@@ -60,6 +69,9 @@ mkdir "$stage"
 if matches "$PACKAGE_DIR/$ARCHIVE" "$EXPECTED"; then
   archive="$PACKAGE_DIR/$ARCHIVE"
   printf '%s\n' 'Using the verified local ZIP; no download needed.'
+elif verified_local_zip; then
+  archive="$stage/$ARCHIVE"
+  printf '%s\n' 'Using the locally saved IPA and matching installer; no download needed.'
 elif [ -n "${SIBOOT_ARCHIVE:-}" ]; then
   matches "$SIBOOT_ARCHIVE" "$EXPECTED" || fail 'The selected local ZIP does not match this update.'
   cp "$SIBOOT_ARCHIVE" "$stage/$ARCHIVE"

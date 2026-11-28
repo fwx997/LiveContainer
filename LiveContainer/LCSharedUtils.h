@@ -32,7 +32,7 @@
 + (void)setAutomatic:(BOOL)enabled NS_SWIFT_NAME(setAutomatic(_:));
 + (BOOL)captureIPA:(NSURL * _Nonnull)ipa bundleURL:(NSURL * _Nonnull)bundleURL error:(NSError * _Nullable * _Nullable)error;
 + (void)saveWithCompletion:(void (^ _Nonnull)(NSError * _Nullable error))completion NS_SWIFT_NAME(saveWithCompletion(_:));
-+ (void)saveAutomaticallyWithCompletion:(void (^ _Nonnull)(NSError * _Nullable error))completion NS_SWIFT_NAME(saveAutomaticallyWithCompletion(_:));
++ (void)saveAutomaticallyForBuild:(NSString * _Nonnull)build completion:(void (^ _Nonnull)(NSError * _Nullable error))completion NS_SWIFT_NAME(saveAutomatically(forBuild:completion:));
 @end
 
 // Main-thread bridge shared by the three separately loaded applications.
