@@ -59,7 +59,7 @@ struct RecoverySettingsPreview: View {
                     HStack {
                         Text("保存位置").foregroundStyle(.primary)
                         Spacer()
-                        Text("LiveContainer 恢复").foregroundStyle(.secondary)
+                        Text("livecontainer").foregroundStyle(.secondary)
                         Image(systemName: "chevron.right")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.tertiary)
@@ -93,10 +93,14 @@ struct RecoverySettingsPreview: View {
     }
 }
 
-final class PreviewDelegate: NSObject, UIApplicationDelegate {
+final class PreviewDelegate: NSObject, UIApplicationDelegate, UIWindowSceneDelegate {
     var window: UIWindow?
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        true
+    }
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: scene)
         window.rootViewController = UIHostingController(rootView: RecoverySettingsPreview())
         window.overrideUserInterfaceStyle = ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light
         window.makeKeyAndVisible()
@@ -105,7 +109,6 @@ final class PreviewDelegate: NSObject, UIApplicationDelegate {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             try? "ready".write(to: documents.appendingPathComponent("ready.txt"), atomically: true, encoding: .utf8)
         }
-        return true
     }
 }
 

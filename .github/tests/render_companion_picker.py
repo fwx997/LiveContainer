@@ -27,7 +27,10 @@ def main():
     command("xcrun", "swiftc", "-sdk", sdk, "-target", f"{arch}-apple-ios17.4-simulator", str(source), "-o", str(app / "Preview"))
     info = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleExecutable": "Preview", "CFBundleName": "Recovery preview",
             "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0",
-            "MinimumOSVersion": "17.4", "UIDeviceFamily": [1, 2], "UILaunchScreen": {}}
+            "MinimumOSVersion": "17.4", "UIDeviceFamily": [1, 2], "UILaunchScreen": {},
+            "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False,
+                "UISceneConfigurations": {"UIWindowSceneSessionRoleApplication": [
+                    {"UISceneConfigurationName": "Preview", "UISceneDelegateClassName": "Preview.PreviewDelegate"}]}}}
     (app / "Info.plist").write_bytes(plistlib.dumps(info))
     command("codesign", "--force", "--sign", "-", str(app))
     devices = json.loads(command("xcrun", "simctl", "list", "devices", "available", "--json"))["devices"]
