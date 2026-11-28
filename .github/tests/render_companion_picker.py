@@ -1,172 +1,58 @@
-"""Render the production UIKit picker on iPhone and iPad simulators for visual review."""
-
+"""Render the proposed native SwiftUI recovery settings, without changing the app."""
 import argparse
 import json
 from pathlib import Path
 import platform
 import plistlib
-import re
-import signal
-import shutil
 import subprocess
 import time
-import zipfile
 
-from test_background_refresh import ROOT, production_method
+BUNDLE_ID = "com.livecontainer.RecoverySettingsPreview"
 
-
-BUNDLE_ID = "com.livecontainer.CompanionPickerPreview"
-
-
-def command(*arguments, timeout=120):
-    return subprocess.check_output(arguments, text=True, timeout=timeout).strip()
-
-
-def production_source():
-    source = (ROOT / "LiveContainer/LCSharedUtils.m").read_text(encoding="utf-8")
-    methods = ["+ (UIImage *)currentNavigationIcon", "+ (UIButton *)navigationButton", "+ (UIMenu *)navigationMenu"]
-    menu = "\n\n".join(production_method(source, signature) for signature in methods)
-    fixture = Path(__file__).with_name("CompanionPickerPreview.m").read_text(encoding="utf-8")
-    return fixture.replace("// INSERT_MENU", menu)
-
-
-def extract_icon(ipa, destination):
-    with zipfile.ZipFile(ipa) as archive:
-        icon = next(name for name in archive.namelist() if name.startswith("Payload/") and name.endswith(".app/AppIcon60x60@2x.png"))
-        destination.write_bytes(archive.read(icon))
-
-
-def build_app(output, store, installer):
-    app = output / "CompanionPickerPreview.app"
-    app.mkdir(parents=True, exist_ok=True)
-    source = output / "CompanionPickerPreview.m"
-    source.write_text(production_source(), encoding="utf-8")
-    sdk = command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
-    arch = "arm64" if platform.machine() == "arm64" else "x86_64"
-    command("xcrun", "--sdk", "iphonesimulator", "clang", "-fobjc-arc", "-fblocks", "-isysroot", sdk,
-            "-target", f"{arch}-apple-ios17.4-simulator", "-framework", "UIKit", "-framework", "Foundation",
-            "-framework", "CoreGraphics", "-framework", "QuartzCore",
-            str(source), "-o", str(app / "CompanionPickerPreview"))
-    info = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleExecutable": "CompanionPickerPreview",
-            "CFBundleName": "Picker Preview", "CFBundlePackageType": "APPL", "CFBundleVersion": "1",
-            "CFBundleShortVersionString": "1.0", "MinimumOSVersion": "17.4", "UIDeviceFamily": [1, 2],
-            "UILaunchScreen": {}, "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False,
-                "UISceneConfigurations": {"UIWindowSceneSessionRoleApplication": [
-                    {"UISceneConfigurationName": "Preview", "UISceneDelegateClassName": "PreviewDelegate"}]}}}
-    (app / "Info.plist").write_bytes(plistlib.dumps(info))
-    shutil.copy2(ROOT / "Resources/Assets.xcassets/AppIcon.appiconset/AppIcon1024.png", app / "ui.png")
-    extract_icon(store, app / "builtinSideStore.png")
-    extract_icon(installer, app / "builtinSideInstaller.png")
-    command("codesign", "--force", "--sign", "-", str(app))
-    return app
-
-
-def simulator_models():
-    devices = json.loads(command("xcrun", "simctl", "list", "devices", "available", "--json"))["devices"]
-    runtime_info = json.loads(command("xcrun", "simctl", "list", "runtimes", "--json"))["runtimes"]
-    versions = {item["identifier"]: tuple(int(value) for value in item["version"].split("."))
-                for item in runtime_info if item.get("isAvailable")
-                and re.search(r"\.iOS-\d+-\d+(?:-\d+)?$", item["identifier"])}
-    selected = []
-    for family in ("iPhone", "iPad"):
-        candidates = [(versions[runtime], runtime, item) for runtime, items in devices.items() if runtime in versions
-                      for item in items if item["name"].startswith(family)]
-        sdk_version = tuple(int(value) for value in command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-version").split("."))
-        compatible = [item for item in candidates if item[0][:2] == sdk_version[:2]]
-        _, runtime, device = max(compatible or candidates, key=lambda item: item[0])
-        selected.append((family, runtime, device))
-    return selected
-
-
-def render_style(device, family, style, grouped, output):
-    name = f"{family}-{'grouped' if grouped else 'single'}-{style}"
-    recording = subprocess.Popen(["xcrun", "simctl", "io", device, "recordVideo", "--codec=h264", str(output / f"{name}.mp4")],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        capture_style(device, style, grouped, name, output)
-    finally:
-        recording.send_signal(signal.SIGINT)
-        recording.wait(timeout=30)
-
-
-def capture_style(device, style, grouped, name, output):
-    mode = "grouped" if grouped else "single"
-    print(command("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID, style, mode), flush=True)
-    container = Path(command("xcrun", "simctl", "get_app_container", device, BUNDLE_ID, "data"))
-    layout_file = container / "Documents/layout.json"
-    deadline = time.monotonic() + 45
-    while not layout_file.exists() and time.monotonic() < deadline:
-        time.sleep(0.25)
-    command("xcrun", "simctl", "io", device, "screenshot", str(output / f"{name}.png"))
-    if not layout_file.exists():
-        diagnostics = command("xcrun", "simctl", "spawn", device, "log", "show", "--last", "2m", "--style", "compact",
-                              "--predicate", 'process == "CompanionPickerPreview"', timeout=30)
-        (output / f"{name}.txt").write_text(diagnostics, encoding="utf-8")
-        raise RuntimeError("The preview did not record its layout; see its screenshot and simulator log")
-    layout = json.loads(layout_file.read_text())
-    (output / f"{name}.json").write_text(json.dumps(layout, indent=2) + "\n")
-    command("xcrun", "simctl", "terminate", device, BUNDLE_ID)
-    layout_file.unlink()
-    assert layout["systemMenu"] and layout["menuTitle"] == "", layout
-    assert {"LiveContainer", "SideStore", "SideInstaller"}.issubset(layout["visibleLabels"]), layout
-    assert "切换应用" not in layout["visibleLabels"], layout
-    assert layout["imageViews"] >= 4, layout
-    assert not grouped or 0 <= layout["buttonGap"] <= 16, layout
-    print("Rendered production picker:", name, flush=True)
-
-
-def render_device(app, family, runtime, selected, output):
-    device = selected["udid"]
-    print("Rendering on", selected["name"], runtime, flush=True)
-    diagnostic = {"device": selected["name"], "runtime": runtime, "stage": "boot"}
-    try:
-        if selected["state"] != "Booted":
-            command("xcrun", "simctl", "boot", device)
-        command("xcrun", "simctl", "bootstatus", device, "-b", timeout=600)
-        print("Simulator boot completed", flush=True)
-        diagnostic["stage"] = "install"
-        command("xcrun", "simctl", "install", device, str(app), timeout=600)
-        print("Preview app installed", flush=True)
-        diagnostic["stage"] = "render"
-        for grouped in (False, True):
-            for style in ("light", "dark"):
-                render_style(device, family, style, grouped, output)
-        diagnostic["status"] = "passed"
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
-        diagnostic.update(status="simulator_unavailable", error=str(error))
-        raise
-    finally:
-        (output / f"{family}-environment.json").write_text(json.dumps(diagnostic, indent=2) + "\n")
-        try:
-            subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=30)
-        except subprocess.TimeoutExpired:
-            print("Simulator shutdown timed out after preview diagnostics were saved", flush=True)
-
+def command(*args, timeout=120):
+    return subprocess.check_output(args, text=True, timeout=timeout).strip()
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--sidestore-ipa", type=Path, required=True)
-    parser.add_argument("--sideinstaller-ipa", type=Path, required=True)
-    parser.add_argument("--family", choices=("iPhone", "iPad"))
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    app = build_app(output, args.sidestore_ipa, args.sideinstaller_ipa)
-    subprocess.run(["open", "-a", "Simulator"], check=False, timeout=30)
-    for family, runtime, selected in simulator_models():
-        if args.family and family != args.family:
-            continue
-        try:
-            render_device(app, family, runtime, selected, output)
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
-            if family == "iPhone":
-                raise
-            diagnostic = {"device": selected["name"], "runtime": runtime, "status": "simulator_unavailable",
-                          "error": str(error)}
-            (output / "iPad-environment.json").write_text(json.dumps(diagnostic, indent=2) + "\n")
-            print("iPad simulator unavailable:", error, flush=True)
+    app = output / "RecoverySettingsPreview.app"
+    app.mkdir()
+    source = app / "main.swift"
+    source.write_bytes(Path(__file__).with_name("RecoverySettingsPreview.swift").read_bytes())
+    sdk = command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
+    arch = "arm64" if platform.machine() == "arm64" else "x86_64"
+    command("xcrun", "swiftc", "-sdk", sdk, "-target", f"{arch}-apple-ios17.4-simulator", str(source), "-o", str(app / "Preview"))
+    info = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleExecutable": "Preview", "CFBundleName": "Recovery preview",
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0",
+            "MinimumOSVersion": "17.4", "UIDeviceFamily": [1, 2], "UILaunchScreen": {}}
+    (app / "Info.plist").write_bytes(plistlib.dumps(info))
+    command("codesign", "--force", "--sign", "-", str(app))
+    devices = json.loads(command("xcrun", "simctl", "list", "devices", "available", "--json"))["devices"]
+    sdk_version = command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-version").replace(".", "-")
+    runtime = next(key for key in devices if key.endswith("iOS-" + sdk_version))
+    selected = next(item for item in devices[runtime] if item["name"].startswith("iPhone"))
+    device = selected["udid"]
+    subprocess.run(["open", "-a", "Simulator"], check=False)
+    if selected["state"] != "Booted": command("xcrun", "simctl", "boot", device)
+    command("xcrun", "simctl", "bootstatus", device, "-b", timeout=600)
+    command("xcrun", "simctl", "install", device, str(app), timeout=600)
+    for mode, label in (("single", "detail"), ("grouped", "entry")):
+        for style in ("dark", "light"):
+            command("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID, mode, style)
+            container = Path(command("xcrun", "simctl", "get_app_container", device, BUNDLE_ID, "data"))
+            ready = container / "Documents/ready.txt"
+            deadline = time.monotonic() + 60
+            while not ready.exists() and time.monotonic() < deadline: time.sleep(.25)
+            if not ready.exists(): raise RuntimeError("Preview did not become ready")
+            command("xcrun", "simctl", "io", device, "screenshot", str(output / f"recovery-{label}-{style}.png"), timeout=180)
+            command("xcrun", "simctl", "terminate", device, BUNDLE_ID)
+            ready.unlink()
+            print("Rendered", label, style, flush=True)
+    (output / "recovery-preview.json").write_text(json.dumps({"device": selected["name"], "runtime": runtime,
+        "native": "SwiftUI Form, Section, Button, Toggle and NavigationStack", "production_installed": False}, indent=2))
+    command("xcrun", "simctl", "shutdown", device)
 
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
