@@ -571,15 +571,14 @@ static void LCShowCompanionMessage(NSString *message) {
     [super viewDidLoad];
     self.tableView.scrollEnabled = NO;
     self.tableView.rowHeight = 52;
-    self.tableView.backgroundColor = UIColor.secondarySystemBackgroundColor;
-    self.tableView.separatorInset = UIEdgeInsetsMake(0, 54, 0, 12);
-    UILabel *heading = [[UILabel alloc] initWithFrame:CGRectMake(16, 0, 250, 36)];
-    heading.text = @"切换应用";
-    heading.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-    heading.textColor = UIColor.secondaryLabelColor;
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 36)];
-    [header addSubview:heading];
-    self.tableView.tableHeaderView = header;
+    self.tableView.backgroundColor = UIColor.clearColor;
+    self.tableView.opaque = NO;
+    self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    self.tableView.contentInset = UIEdgeInsetsMake(6, 0, 6, 0);
+    self.tableView.sectionHeaderTopPadding = 0;
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 80, 0, 16);
+    self.tableView.separatorColor = [UIColor.separatorColor colorWithAlphaComponent:0.18];
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
     if (self.blockedReason.length) {
         UILabel *reason = [[UILabel alloc] initWithFrame:CGRectMake(16, 8, 248, 0)];
         reason.text = self.blockedReason;
@@ -591,7 +590,7 @@ static void LCShowCompanionMessage(NSString *message) {
         [footer addSubview:reason];
         self.tableView.tableFooterView = footer;
     }
-    self.preferredContentSize = CGSizeMake(280, 36 + self.apps.count * 52 + self.tableView.tableFooterView.bounds.size.height);
+    self.preferredContentSize = CGSizeMake(280, 12 + self.apps.count * 52 + self.tableView.tableFooterView.bounds.size.height);
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -705,6 +704,7 @@ static void LCShowCompanionMessage(NSString *message) {
     picker.modalPresentationStyle = UIModalPresentationPopover;
     [picker loadViewIfNeeded];
     UIPopoverPresentationController *popover = picker.popoverPresentationController;
+    popover.backgroundColor = UIColor.secondarySystemBackgroundColor;
     popover.delegate = picker;
     popover.sourceView = sourceView;
     popover.sourceRect = sourceView.bounds;
