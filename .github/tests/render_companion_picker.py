@@ -50,7 +50,9 @@ def build_app(output, store, installer):
     info = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleExecutable": "CompanionPickerPreview",
             "CFBundleName": "Picker Preview", "CFBundlePackageType": "APPL", "CFBundleVersion": "1",
             "CFBundleShortVersionString": "1.0", "MinimumOSVersion": "17.4", "UIDeviceFamily": [1, 2],
-            "UILaunchScreen": {}}
+            "UILaunchScreen": {}, "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False,
+                "UISceneConfigurations": {"UIWindowSceneSessionRoleApplication": [
+                    {"UISceneConfigurationName": "Preview", "UISceneDelegateClassName": "PreviewDelegate"}]}}}
     (app / "Info.plist").write_bytes(plistlib.dumps(info))
     shutil.copy2(ROOT / "Resources/DefaultIcon.png", app / "ui.png")
     extract_icon(store, app / "builtinSideStore.png")
@@ -75,16 +77,21 @@ def simulator_models():
 
 
 def render_style(device, family, style, output):
-    command("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID, style)
+    print(command("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID, style), flush=True)
     container = Path(command("xcrun", "simctl", "get_app_container", device, BUNDLE_ID, "data"))
     layout_file = container / "Documents/layout.json"
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + 45
     while not layout_file.exists() and time.monotonic() < deadline:
         time.sleep(0.25)
-    layout = json.loads(layout_file.read_text())
     name = f"{family}-{style}"
-    (output / f"{name}.json").write_text(json.dumps(layout, indent=2) + "\n")
     command("xcrun", "simctl", "io", device, "screenshot", str(output / f"{name}.png"))
+    if not layout_file.exists():
+        diagnostics = command("xcrun", "simctl", "spawn", device, "log", "show", "--last", "2m", "--style", "compact",
+                              "--predicate", 'process == "CompanionPickerPreview"', timeout=30)
+        (output / f"{name}.txt").write_text(diagnostics, encoding="utf-8")
+        raise RuntimeError("The preview did not record its layout; see its screenshot and simulator log")
+    layout = json.loads(layout_file.read_text())
+    (output / f"{name}.json").write_text(json.dumps(layout, indent=2) + "\n")
     command("xcrun", "simctl", "terminate", device, BUNDLE_ID)
     layout_file.unlink()
     assert layout["popover"], layout

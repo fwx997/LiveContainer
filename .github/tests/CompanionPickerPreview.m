@@ -33,12 +33,17 @@
 // INSERT_PRESENTATION
 @end
 
-@interface PreviewDelegate : UIResponder <UIApplicationDelegate>
+@interface PreviewDelegate : UIResponder <UIApplicationDelegate, UIWindowSceneDelegate>
 @property(nonatomic, strong) UIWindow *window;
 @end
 
 @implementation PreviewDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+    return YES;
+}
+
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    if (![scene isKindOfClass:UIWindowScene.class]) return;
     BOOL dark = [NSProcessInfo.processInfo.arguments containsObject:@"dark"];
     UIViewController *root = [UIViewController new];
     root.view.backgroundColor = dark ? [UIColor colorWithRed:0 green:0.06 blue:0.22 alpha:1] : UIColor.whiteColor;
@@ -55,7 +60,7 @@
     [button setImage:[LCCompanionBridge navigationIconForApp:LCCompanionBridge.currentAppIdentifier] forState:UIControlStateNormal];
     button.frame = CGRectMake(0, 0, 44, 44);
     root.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:button];
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.overrideUserInterfaceStyle = dark ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
     self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:root];
     [self.window makeKeyAndVisible];
@@ -65,7 +70,6 @@
             [self recordLayout];
         });
     });
-    return YES;
 }
 
 - (void)recordLayout {
