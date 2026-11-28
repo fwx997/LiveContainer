@@ -19,7 +19,7 @@ class RecoveryBackupTests(unittest.TestCase):
             source = directory / "Recovery.m"
             binary = directory / "Recovery"
             source.write_text(harness.replace("// INSERT_RECOVERY_SOURCE", production), encoding="utf-8")
-            subprocess.run(["clang", "-fobjc-arc", "-fblocks", "-Wno-incomplete-implementation",
+            subprocess.run(["clang", "-fmodules", "-fobjc-arc", "-fblocks", "-Wno-incomplete-implementation",
                             "-Wno-deprecated-declarations", "-I", str(ROOT / "LiveContainer"),
                             "-framework", "Foundation", str(source), "-o", str(binary)], check=True, timeout=60)
             fixtures = directory / "fixtures"
