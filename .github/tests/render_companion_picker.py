@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shutil
 import subprocess
 import time
@@ -62,13 +63,14 @@ def simulator_models():
     devices = json.loads(command("xcrun", "simctl", "list", "devices", "available", "--json"))["devices"]
     runtime_info = json.loads(command("xcrun", "simctl", "list", "runtimes", "--json"))["runtimes"]
     versions = {item["identifier"]: tuple(int(value) for value in item["version"].split("."))
-                for item in runtime_info if item.get("isAvailable") and item["name"].startswith("iOS")}
+                for item in runtime_info if item.get("isAvailable")
+                and re.search(r"\.iOS-\d+-\d+(?:-\d+)?$", item["identifier"])}
     selected = []
     for family in ("iPhone", "iPad"):
         candidates = [(versions[runtime], runtime, item) for runtime, items in devices.items() if runtime in versions
                       for item in items if item["name"].startswith(family)]
         _, runtime, device = max(candidates, key=lambda item: item[0])
-        selected.append((family, runtime, device["deviceTypeIdentifier"]))
+        selected.append((family, runtime, device))
     return selected
 
 
@@ -93,17 +95,20 @@ def render_style(device, family, style, output):
     print("Rendered production picker:", name, flush=True)
 
 
-def render_device(app, family, runtime, device_type, output):
-    device = command("xcrun", "simctl", "create", "Companion Picker " + family, device_type, runtime)
+def render_device(app, family, runtime, selected, output):
+    device = selected["udid"]
+    print("Rendering on", selected["name"], runtime, flush=True)
     try:
-        command("xcrun", "simctl", "boot", device)
+        if selected["state"] != "Booted":
+            command("xcrun", "simctl", "boot", device)
         command("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
+        print("Simulator boot completed", flush=True)
         command("xcrun", "simctl", "install", device, str(app))
+        print("Preview app installed", flush=True)
         for style in ("light", "dark"):
             render_style(device, family, style, output)
     finally:
         subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=30)
-        subprocess.run(["xcrun", "simctl", "delete", device], check=False, timeout=30)
 
 
 def main():
@@ -115,8 +120,8 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     app = build_app(output, args.sidestore_ipa, args.sideinstaller_ipa)
-    for family, runtime, device_type in simulator_models():
-        render_device(app, family, runtime, device_type, output)
+    for family, runtime, selected in simulator_models():
+        render_device(app, family, runtime, selected, output)
 
 
 if __name__ == "__main__":
