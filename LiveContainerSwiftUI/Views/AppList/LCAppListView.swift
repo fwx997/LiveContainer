@@ -227,7 +227,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             
             .navigationTitle("lc.appList.myApps".loc)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     if sharedModel.multiLCStatus != 2 {
                         if installprogressVisible {
                             ProgressView().progressViewStyle(.circular).padding(.horizontal, 8)
@@ -235,8 +235,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                             installMenu
                         }
                     }
+                    LCCompanionToolbarControl { helpPresent = true }
                 }
-                LCCompanionToolbarItem { helpPresent = true }
                 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("lc.appList.openLink".loc, systemImage: "link", action: {

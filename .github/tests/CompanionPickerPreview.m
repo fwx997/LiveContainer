@@ -5,11 +5,13 @@
 + (NSString *)currentAppIdentifier;
 + (NSString *)switchBlockReason;
 + (UIImage *)navigationIconForApp:(NSString *)identifier;
-+ (void)presentNavigationMenuFromView:(UIView *)sourceView;
++ (UIImage *)currentNavigationIcon;
++ (UIButton *)navigationButton;
++ (UIMenu *)navigationMenu;
 + (BOOL)openApp:(NSString *)identifier;
 @end
 
-// INSERT_PICKER
+static NSString *const LCCompanionMenuID = @"lc.companion.switch";
 
 @implementation LCCompanionBridge
 + (NSArray *)availableApps {
@@ -18,6 +20,7 @@
              @{@"identifier": @"builtinSideInstaller", @"name": @"SideInstaller"}];
 }
 + (NSString *)currentAppIdentifier {
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"grouped"]) return @"ui";
     return [NSProcessInfo.processInfo.arguments containsObject:@"dark"] ? @"builtinSideInstaller" : @"builtinSideStore";
 }
 + (NSString *)switchBlockReason { return nil; }
@@ -30,11 +33,13 @@
         [source drawInRect:CGRectMake(0, 0, 26, 26)];
     }] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
 }
-// INSERT_PRESENTATION
+// INSERT_MENU
 @end
 
 @interface PreviewDelegate : UIResponder <UIApplicationDelegate, UIWindowSceneDelegate>
 @property(nonatomic, strong) UIWindow *window;
+@property(nonatomic, strong) UIButton *switchButton;
+@property(nonatomic, strong) UIButton *installButton;
 @end
 
 @implementation PreviewDelegate
@@ -56,20 +61,28 @@
     background.textColor = UIColor.whiteColor;
     background.font = [UIFont boldSystemFontOfSize:40];
     [root.view addSubview:background];
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    [button setImage:[LCCompanionBridge navigationIconForApp:LCCompanionBridge.currentAppIdentifier] forState:UIControlStateNormal];
-    [NSLayoutConstraint activateConstraints:@[[button.widthAnchor constraintEqualToConstant:44],
-                                               [button.heightAnchor constraintEqualToConstant:44]]];
-    UIView *space = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 24, 1)];
+    UIButton *button = [LCCompanionBridge navigationButton];
+    self.switchButton = button;
+    BOOL grouped = [NSProcessInfo.processInfo.arguments containsObject:@"grouped"];
+    UIView *space = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 1)];
     UIBarButtonItem *spacing = [[UIBarButtonItem alloc] initWithCustomView:space];
     if (@available(iOS 26.0, *)) spacing.hidesSharedBackground = YES;
-    root.navigationItem.leftBarButtonItems = @[spacing, [[UIBarButtonItem alloc] initWithCustomView:button]];
+    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:button];
+    root.navigationItem.leftBarButtonItems = @[spacing, switcher];
+    if (grouped) {
+        self.installButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        [self.installButton setImage:[UIImage systemImageNamed:@"plus"] forState:UIControlStateNormal];
+        [NSLayoutConstraint activateConstraints:@[[self.installButton.widthAnchor constraintEqualToConstant:44],
+                                                   [self.installButton.heightAnchor constraintEqualToConstant:44]]];
+        UIBarButtonItem *install = [[UIBarButtonItem alloc] initWithCustomView:self.installButton];
+        root.navigationItem.leftBarButtonItems = @[install, switcher];
+    }
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.overrideUserInterfaceStyle = dark ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
     self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:root];
     [self.window makeKeyAndVisible];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        [LCCompanionBridge presentNavigationMenuFromView:button];
+        [button performPrimaryAction];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             [self recordLayout];
         });
@@ -77,35 +90,32 @@
 }
 
 - (void)recordLayout {
-    LCCompanionPicker *picker = (LCCompanionPicker *)self.window.rootViewController.presentedViewController;
-    NSMutableArray *rows = [NSMutableArray array];
-    NSUInteger separators = 0;
-    for (UITableViewCell *cell in picker.tableView.visibleCells) {
-        [cell layoutIfNeeded];
-        UIStackView *row = (UIStackView *)cell.contentView.subviews.firstObject;
-        UILabel *name = (UILabel *)row.arrangedSubviews.lastObject;
-        CGRect nameFrame = [name convertRect:name.bounds toView:cell.contentView];
-        [rows addObject:@{@"title": name.text, @"height": @(cell.bounds.size.height), @"titleX": @(nameFrame.origin.x),
-                         @"leftMargin": @(row.frame.origin.x), @"rightMargin": @(cell.contentView.bounds.size.width - CGRectGetMaxX(row.frame))}];
-        for (UIView *view in cell.contentView.subviews) {
-            if ([view.accessibilityIdentifier isEqualToString:@"lc.companion.separator"]) separators++;
-        }
+    NSMutableArray<UIView *> *pending = [self.window.windowScene.windows mutableCopy];
+    NSMutableArray *labels = [NSMutableArray array];
+    NSMutableArray *classes = [NSMutableArray array];
+    NSUInteger images = 0;
+    while (pending.count) {
+        UIView *view = pending.lastObject;
+        [pending removeLastObject];
+        [pending addObjectsFromArray:view.subviews];
+        if (view.hidden || view.alpha == 0) continue;
+        [classes addObject:NSStringFromClass(view.class)];
+        if ([view isKindOfClass:UILabel.class] && ((UILabel *)view).text.length) [labels addObject:((UILabel *)view).text];
+        if ([view isKindOfClass:UIImageView.class] && ((UIImageView *)view).image) images++;
     }
+    CGRect buttonFrame = [self.switchButton convertRect:self.switchButton.bounds toView:self.window];
+    CGRect installFrame = self.installButton ? [self.installButton convertRect:self.installButton.bounds toView:self.window] : CGRectZero;
     NSDictionary *result = @{
-        @"rows": rows,
-        @"headerHeight": @(picker.tableView.tableHeaderView.bounds.size.height),
-        @"footerHeight": @(picker.tableView.tableFooterView.bounds.size.height),
-        @"contentHeight": @(picker.preferredContentSize.height),
-        @"topInset": @(picker.tableView.contentInset.top),
-        @"adjustedTopInset": @(picker.tableView.adjustedContentInset.top),
-        @"separatorX": @(picker.tableView.separatorInset.left),
-        @"separatorCount": @(separators),
-        @"nativePopoverBackground": @(picker.popoverPresentationController.popoverBackgroundViewClass == Nil),
-        @"tableBackgroundAlpha": @(CGColorGetAlpha(picker.tableView.backgroundColor.CGColor)),
-        @"arrowDirection": @(picker.popoverPresentationController.arrowDirection),
-        @"sourceRect": NSStringFromCGRect(picker.popoverPresentationController.sourceRect),
-        @"popover": @([picker.presentationController isKindOfClass:UIPopoverPresentationController.class]),
-        @"pickerFrame": NSStringFromCGRect([picker.view convertRect:picker.view.bounds toView:self.window])
+        @"systemMenu": @(self.switchButton.showsMenuAsPrimaryAction && self.switchButton.contextMenuInteraction != nil),
+        @"menuTitle": self.switchButton.menu.title,
+        @"currentApp": LCCompanionBridge.currentAppIdentifier,
+        @"visibleLabels": labels,
+        @"viewClasses": classes,
+        @"imageViews": @(images),
+        @"buttonFrame": NSStringFromCGRect(buttonFrame),
+        @"installButtonFrame": NSStringFromCGRect(installFrame),
+        @"grouped": @(self.installButton != nil),
+        @"buttonGap": @(self.installButton ? CGRectGetMinX(buttonFrame) - CGRectGetMaxX(installFrame) : 0)
     };
     NSURL *documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
     [[NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil]

@@ -26,7 +26,7 @@
 @end
 
 // Main-thread bridge shared by the three separately loaded applications.
-@class UIMenu, UIImage, UIView;
+@class UIMenu, UIImage, UIButton;
 @interface LCCompanionBridge : NSObject
 + (NSString *)currentAppIdentifier;
 + (NSString *)switchBlockReason;
@@ -36,7 +36,7 @@
 + (BOOL)handleCompanionURL:(NSURL *)url NS_SWIFT_NAME(handleCompanionURL(_:));
 + (UIImage *)currentNavigationIcon;
 + (UIImage *)navigationIconForApp:(NSString *)identifier NS_SWIFT_NAME(navigationIcon(forApp:));
-+ (void)presentNavigationMenuFromView:(UIView *)sourceView NS_SWIFT_NAME(presentNavigationMenu(from:));
++ (UIButton *)navigationButton NS_SWIFT_NAME(makeNavigationButton());
 + (UIMenu *)navigationMenu;
 + (void)installNavigationMenus;
 + (void)setActivity:(NSString *)identifier reason:(NSString * _Nullable)reason NS_SWIFT_NAME(setActivity(_:reason:));

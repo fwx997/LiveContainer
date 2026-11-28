@@ -10,19 +10,23 @@ import SwiftUI
 
 private struct LCCompanionMenuButton: UIViewRepresentable {
     func makeUIView(context: Context) -> UIButton {
-        let button = UIButton(type: .system)
-        button.setImage(LCCompanionBridge.currentNavigationIcon(), for: .normal)
-        button.addAction(UIAction { [weak button] _ in
-            guard let button else { return }
-            LCCompanionBridge.presentNavigationMenu(from: button)
-        }, for: .touchUpInside)
-        button.accessibilityLabel = "切换 LiveContainer、SideStore 或 SideInstaller"
-        button.accessibilityIdentifier = "lc.companion.switch"
-        return button
+        LCCompanionBridge.makeNavigationButton()
     }
 
     func updateUIView(_ button: UIButton, context: Context) {
         button.setImage(LCCompanionBridge.currentNavigationIcon(), for: .normal)
+    }
+}
+
+struct LCCompanionToolbarControl: View {
+    var showHelp: (() -> Void)? = nil
+
+    var body: some View {
+        if LCCompanionBridge.availableApps().count > 1 {
+            LCCompanionMenuButton().frame(width: 44, height: 44)
+        } else if let showHelp {
+            Button("Help", systemImage: "questionmark", action: showHelp)
+        }
     }
 }
 
@@ -33,12 +37,12 @@ struct LCCompanionToolbarItem: ToolbarContent {
     private var edgeSpacing: some ToolbarContent {
         if #available(iOS 26.0, *) {
             ToolbarItem(placement: .topBarLeading) {
-                Color.clear.frame(width: 24, height: 1).allowsHitTesting(false)
+                Color.clear.frame(width: 8, height: 1).allowsHitTesting(false)
             }
             .sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItem(placement: .topBarLeading) {
-                Color.clear.frame(width: 24, height: 1).allowsHitTesting(false)
+                Color.clear.frame(width: 8, height: 1).allowsHitTesting(false)
             }
         }
     }
@@ -48,11 +52,7 @@ struct LCCompanionToolbarItem: ToolbarContent {
             edgeSpacing
         }
         ToolbarItem(placement: .topBarLeading) {
-            if LCCompanionBridge.availableApps().count > 1 {
-                LCCompanionMenuButton().frame(width: 44, height: 44)
-            } else if let showHelp {
-                Button("Help", systemImage: "questionmark", action: showHelp)
-            }
+            LCCompanionToolbarControl(showHelp: showHelp)
         }
     }
 }

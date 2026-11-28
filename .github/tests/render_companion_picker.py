@@ -6,6 +6,7 @@ from pathlib import Path
 import platform
 import plistlib
 import re
+import signal
 import shutil
 import subprocess
 import time
@@ -23,11 +24,10 @@ def command(*arguments, timeout=120):
 
 def production_source():
     source = (ROOT / "LiveContainer/LCSharedUtils.m").read_text(encoding="utf-8")
-    start = source.index("@interface LCCompanionPicker :")
-    end = source.index("@implementation LCCompanionBridge", start)
-    presentation = production_method(source, "+ (void)presentNavigationMenuFromView:")
+    methods = ["+ (UIImage *)currentNavigationIcon", "+ (UIButton *)navigationButton", "+ (UIMenu *)navigationMenu"]
+    menu = "\n\n".join(production_method(source, signature) for signature in methods)
     fixture = Path(__file__).with_name("CompanionPickerPreview.m").read_text(encoding="utf-8")
-    return fixture.replace("// INSERT_PICKER", source[start:end]).replace("// INSERT_PRESENTATION", presentation)
+    return fixture.replace("// INSERT_MENU", menu)
 
 
 def extract_icon(ipa, destination):
@@ -78,14 +78,25 @@ def simulator_models():
     return selected
 
 
-def render_style(device, family, style, output):
-    print(command("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID, style), flush=True)
+def render_style(device, family, style, grouped, output):
+    name = f"{family}-{'grouped' if grouped else 'single'}-{style}"
+    recording = subprocess.Popen(["xcrun", "simctl", "io", device, "recordVideo", "--codec=h264", str(output / f"{name}.mp4")],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        capture_style(device, style, grouped, name, output)
+    finally:
+        recording.send_signal(signal.SIGINT)
+        recording.wait(timeout=30)
+
+
+def capture_style(device, style, grouped, name, output):
+    mode = "grouped" if grouped else "single"
+    print(command("xcrun", "simctl", "launch", "--terminate-running-process", device, BUNDLE_ID, style, mode), flush=True)
     container = Path(command("xcrun", "simctl", "get_app_container", device, BUNDLE_ID, "data"))
     layout_file = container / "Documents/layout.json"
     deadline = time.monotonic() + 45
     while not layout_file.exists() and time.monotonic() < deadline:
         time.sleep(0.25)
-    name = f"{family}-{style}"
     command("xcrun", "simctl", "io", device, "screenshot", str(output / f"{name}.png"))
     if not layout_file.exists():
         diagnostics = command("xcrun", "simctl", "spawn", device, "log", "show", "--last", "2m", "--style", "compact",
@@ -96,15 +107,11 @@ def render_style(device, family, style, output):
     (output / f"{name}.json").write_text(json.dumps(layout, indent=2) + "\n")
     command("xcrun", "simctl", "terminate", device, BUNDLE_ID)
     layout_file.unlink()
-    assert layout["popover"], layout
-    assert layout["headerHeight"] == layout["footerHeight"] == 12 and layout["contentHeight"] == 180, layout
-    assert layout["topInset"] == layout["adjustedTopInset"] == 0, layout
-    assert layout["separatorCount"] == 2, layout
-    assert layout["nativePopoverBackground"] and layout["tableBackgroundAlpha"] == 0, layout
-    assert layout["arrowDirection"] in (1, 2), layout
-    assert [row["title"] for row in layout["rows"]] == ["LiveContainer", "SideStore", "SideInstaller"], layout
-    assert all(row["height"] == 52 and row["titleX"] == layout["separatorX"] for row in layout["rows"]), layout
-    assert all(row["leftMargin"] == row["rightMargin"] == 12 for row in layout["rows"]), layout
+    assert layout["systemMenu"] and layout["menuTitle"] == "", layout
+    assert {"LiveContainer", "SideStore", "SideInstaller"}.issubset(layout["visibleLabels"]), layout
+    assert "切换应用" not in layout["visibleLabels"], layout
+    assert layout["imageViews"] >= 4, layout
+    assert not grouped or 0 <= layout["buttonGap"] <= 16, layout
     print("Rendered production picker:", name, flush=True)
 
 
@@ -121,8 +128,9 @@ def render_device(app, family, runtime, selected, output):
         command("xcrun", "simctl", "install", device, str(app), timeout=600)
         print("Preview app installed", flush=True)
         diagnostic["stage"] = "render"
-        for style in ("light", "dark"):
-            render_style(device, family, style, output)
+        for grouped in (False, True):
+            for style in ("light", "dark"):
+                render_style(device, family, style, grouped, output)
         diagnostic["status"] = "passed"
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
         diagnostic.update(status="simulator_unavailable", error=str(error))

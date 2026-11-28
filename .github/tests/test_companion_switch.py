@@ -34,7 +34,7 @@ class CompanionHarnessTests(unittest.TestCase):
         self.assertLess(update.index("if (isRoot && !NSUserDefaults.builtInAppIdentifier) return;"),
                         update.index("top.navigationItem"))
         views = ROOT / "LiveContainerSwiftUI/Views"
-        for name in ("AppList/LCAppListView.swift", "LCAltStoreSourcesView.swift",
+        for name in ("LCAltStoreSourcesView.swift",
                      "LCTweaksView.swift", "Settings/LCSettingsView.swift"):
             with self.subTest(tab=name):
                 self.assertEqual((views / name).read_text(encoding="utf-8").count("LCCompanionToolbarItem"), 1)
@@ -43,16 +43,20 @@ class CompanionHarnessTests(unittest.TestCase):
         views = ROOT / "LiveContainerSwiftUI/Views"
         apps = (views / "AppList/LCAppListView.swift").read_text(encoding="utf-8")
         toolbar = production_method(apps, ".toolbar {")
-        leading = production_method(toolbar, "ToolbarItem(placement: .topBarLeading)")
+        leading = production_method(toolbar, "ToolbarItemGroup(placement: .topBarLeading)")
         self.assertIn("sharedModel.multiLCStatus != 2", leading)
         self.assertRegex(leading, r"(?s)if installprogressVisible\s*\{.*?ProgressView\(\).*?\}\s*else\s*\{\s*installMenu")
-        self.assertIn("LCCompanionToolbarItem", toolbar.split(leading, 1)[1])
+        self.assertIn("LCCompanionToolbarControl", leading)
         menu = production_method(apps, "private var installMenu:")
         self.assertIn('systemImage: "plus"', menu)
         self.assertRegex(menu, r'(?s)installFromIpa".*?choosingIPA = true')
         self.assertRegex(menu, r'(?s)installFromUrl".*?await startInstallFromUrl\(\)')
         tabs = (views / "LCTabView.swift").read_text(encoding="utf-8")
-        self.assertIn("LCCompanionBridge.presentNavigationMenu(from: button)", tabs)
+        self.assertIn("LCCompanionBridge.makeNavigationButton()", tabs)
+        bridge = (ROOT / "LiveContainer/LCSharedUtils.m").read_text(encoding="utf-8")
+        button = production_method(bridge, "+ (UIButton *)navigationButton")
+        self.assertIn("button.showsMenuAsPrimaryAction = YES", button)
+        self.assertNotIn("LCCompanionPicker", bridge)
 
     @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "macOS Foundation is required")
     def test_direct_switch_callbacks_and_active_tasks(self):
