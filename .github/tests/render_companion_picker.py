@@ -140,12 +140,15 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sidestore-ipa", type=Path, required=True)
     parser.add_argument("--sideinstaller-ipa", type=Path, required=True)
+    parser.add_argument("--family", choices=("iPhone", "iPad"))
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     app = build_app(output, args.sidestore_ipa, args.sideinstaller_ipa)
     subprocess.run(["open", "-a", "Simulator"], check=False, timeout=30)
     for family, runtime, selected in simulator_models():
+        if args.family and family != args.family:
+            continue
         try:
             render_device(app, family, runtime, selected, output)
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:

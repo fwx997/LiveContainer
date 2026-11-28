@@ -721,7 +721,17 @@ static void LCShowCompanionMessage(NSString *message) {
     UIPopoverPresentationController *popover = picker.popoverPresentationController;
     popover.delegate = picker;
     popover.sourceView = sourceView;
-    popover.sourceRect = sourceView.bounds;
+    CGRect anchor = sourceView.bounds;
+    CGPoint center = [sourceView convertPoint:CGPointMake(CGRectGetMidX(anchor), CGRectGetMidY(anchor)) toView:sourceView.window];
+    // Keep the native glass arrow on the button, clear of the adjacent rounded corner.
+    if (center.x < 80) {
+        anchor.origin.x = CGRectGetMaxX(anchor) - 1;
+        anchor.size.width = 1;
+    } else if (center.x > sourceView.window.bounds.size.width - 80) {
+        anchor.origin.x = CGRectGetMinX(anchor);
+        anchor.size.width = 1;
+    }
+    popover.sourceRect = anchor;
     popover.permittedArrowDirections = UIPopoverArrowDirectionUp | UIPopoverArrowDirectionDown;
     [presenter presentViewController:picker animated:YES completion:nil];
 }

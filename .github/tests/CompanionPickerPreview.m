@@ -99,6 +99,7 @@
         @"nativePopoverBackground": @(picker.popoverPresentationController.popoverBackgroundViewClass == Nil),
         @"tableBackgroundAlpha": @(CGColorGetAlpha(picker.tableView.backgroundColor.CGColor)),
         @"arrowDirection": @(picker.popoverPresentationController.arrowDirection),
+        @"sourceRect": NSStringFromCGRect(picker.popoverPresentationController.sourceRect),
         @"popover": @([picker.presentationController isKindOfClass:UIPopoverPresentationController.class]),
         @"pickerFrame": NSStringFromCGRect([picker.view convertRect:picker.view.bounds toView:self.window])
     };
