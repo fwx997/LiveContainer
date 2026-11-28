@@ -60,11 +60,14 @@ def build_app(output, store, installer):
 
 def simulator_models():
     devices = json.loads(command("xcrun", "simctl", "list", "devices", "available", "--json"))["devices"]
-    runtimes = [key for key in devices if ".iOS-" in key]
-    runtime = max(runtimes, key=lambda key: tuple(int(value) for value in key.split(".iOS-")[-1].split("-")))
+    runtime_info = json.loads(command("xcrun", "simctl", "list", "runtimes", "--json"))["runtimes"]
+    versions = {item["identifier"]: tuple(int(value) for value in item["version"].split("."))
+                for item in runtime_info if item.get("isAvailable") and item["name"].startswith("iOS")}
     selected = []
     for family in ("iPhone", "iPad"):
-        device = next(item for item in devices[runtime] if item["name"].startswith(family))
+        candidates = [(versions[runtime], runtime, item) for runtime, items in devices.items() if runtime in versions
+                      for item in items if item["name"].startswith(family)]
+        _, runtime, device = max(candidates, key=lambda item: item[0])
         selected.append((family, runtime, device["deviceTypeIdentifier"]))
     return selected
 
