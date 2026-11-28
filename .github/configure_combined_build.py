@@ -22,6 +22,10 @@ def configure_iokit(project_root):
     )
     if count != 1:
         raise ValueError("Expected exactly one IOKit framework reference")
+    # The complete three-app IPA already requires iOS 17.4. Compile its legacy
+    # framework targets against the same floor used by the packaged host.
+    updated = re.sub(r"IPHONEOS_DEPLOYMENT_TARGET = (?:15\.0|16\.0);",
+                     "IPHONEOS_DEPLOYMENT_TARGET = 17.4;", updated)
     path.write_text(updated, encoding="utf-8", newline="\n")
 
 
