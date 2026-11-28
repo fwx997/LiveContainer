@@ -109,17 +109,28 @@ def render_style(device, family, style, output):
 def render_device(app, family, runtime, selected, output):
     device = selected["udid"]
     print("Rendering on", selected["name"], runtime, flush=True)
+    diagnostic = {"device": selected["name"], "runtime": runtime, "stage": "boot"}
     try:
         if selected["state"] != "Booted":
             command("xcrun", "simctl", "boot", device)
-        command("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
+        command("xcrun", "simctl", "bootstatus", device, "-b", timeout=600)
         print("Simulator boot completed", flush=True)
-        command("xcrun", "simctl", "install", device, str(app), timeout=240)
+        diagnostic["stage"] = "install"
+        command("xcrun", "simctl", "install", device, str(app), timeout=600)
         print("Preview app installed", flush=True)
+        diagnostic["stage"] = "render"
         for style in ("light", "dark"):
             render_style(device, family, style, output)
+        diagnostic["status"] = "passed"
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+        diagnostic.update(status="simulator_unavailable", error=str(error))
+        raise
     finally:
-        subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=30)
+        (output / f"{family}-environment.json").write_text(json.dumps(diagnostic, indent=2) + "\n")
+        try:
+            subprocess.run(["xcrun", "simctl", "shutdown", device], check=False, timeout=30)
+        except subprocess.TimeoutExpired:
+            print("Simulator shutdown timed out after preview diagnostics were saved", flush=True)
 
 
 def main():
@@ -131,6 +142,7 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     app = build_app(output, args.sidestore_ipa, args.sideinstaller_ipa)
+    subprocess.run(["open", "-a", "Simulator"], check=False, timeout=30)
     for family, runtime, selected in simulator_models():
         try:
             render_device(app, family, runtime, selected, output)
