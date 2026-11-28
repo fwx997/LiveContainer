@@ -75,12 +75,16 @@
 - (void)recordLayout {
     LCCompanionPicker *picker = (LCCompanionPicker *)self.window.rootViewController.presentedViewController;
     NSMutableArray *rows = [NSMutableArray array];
+    NSUInteger separators = 0;
     for (UITableViewCell *cell in picker.tableView.visibleCells) {
         [cell layoutIfNeeded];
         UIStackView *row = (UIStackView *)cell.contentView.subviews.firstObject;
         UILabel *name = (UILabel *)row.arrangedSubviews.lastObject;
         CGRect nameFrame = [name convertRect:name.bounds toView:cell.contentView];
         [rows addObject:@{@"title": name.text, @"height": @(cell.bounds.size.height), @"titleX": @(nameFrame.origin.x)}];
+        for (UIView *view in cell.contentView.subviews) {
+            if ([view.accessibilityIdentifier isEqualToString:@"lc.companion.separator"]) separators++;
+        }
     }
     NSDictionary *result = @{
         @"rows": rows,
@@ -89,6 +93,7 @@
         @"topInset": @(picker.tableView.contentInset.top),
         @"adjustedTopInset": @(picker.tableView.adjustedContentInset.top),
         @"separatorX": @(picker.tableView.separatorInset.left),
+        @"separatorCount": @(separators),
         @"popover": @([picker.presentationController isKindOfClass:UIPopoverPresentationController.class]),
         @"pickerFrame": NSStringFromCGRect([picker.view convertRect:picker.view.bounds toView:self.window])
     };

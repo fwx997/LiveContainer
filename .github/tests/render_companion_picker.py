@@ -23,7 +23,7 @@ def command(*arguments, timeout=120):
 
 def production_source():
     source = (ROOT / "LiveContainer/LCSharedUtils.m").read_text(encoding="utf-8")
-    start = source.index("@interface LCCompanionPicker :")
+    start = source.index("@interface LCCompanionPickerBackground :")
     end = source.index("@implementation LCCompanionBridge", start)
     presentation = production_method(source, "+ (void)presentNavigationMenuFromView:")
     fixture = Path(__file__).with_name("CompanionPickerPreview.m").read_text(encoding="utf-8")
@@ -54,7 +54,7 @@ def build_app(output, store, installer):
                 "UISceneConfigurations": {"UIWindowSceneSessionRoleApplication": [
                     {"UISceneConfigurationName": "Preview", "UISceneDelegateClassName": "PreviewDelegate"}]}}}
     (app / "Info.plist").write_bytes(plistlib.dumps(info))
-    shutil.copy2(ROOT / "Resources/DefaultIcon.png", app / "ui.png")
+    shutil.copy2(ROOT / "Resources/Assets.xcassets/AppIcon.appiconset/AppIcon1024.png", app / "ui.png")
     extract_icon(store, app / "builtinSideStore.png")
     extract_icon(installer, app / "builtinSideInstaller.png")
     command("codesign", "--force", "--sign", "-", str(app))
@@ -71,7 +71,9 @@ def simulator_models():
     for family in ("iPhone", "iPad"):
         candidates = [(versions[runtime], runtime, item) for runtime, items in devices.items() if runtime in versions
                       for item in items if item["name"].startswith(family)]
-        _, runtime, device = max(candidates, key=lambda item: item[0])
+        sdk_version = tuple(int(value) for value in command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-version").split("."))
+        compatible = [item for item in candidates if item[0][:2] == sdk_version[:2]]
+        _, runtime, device = max(compatible or candidates, key=lambda item: item[0])
         selected.append((family, runtime, device))
     return selected
 
@@ -97,6 +99,7 @@ def render_style(device, family, style, output):
     assert layout["popover"], layout
     assert layout["headerHeight"] == 0 and layout["contentHeight"] == 168, layout
     assert layout["topInset"] == layout["adjustedTopInset"] == 6, layout
+    assert layout["separatorCount"] == 2, layout
     assert [row["title"] for row in layout["rows"]] == ["LiveContainer", "SideStore", "SideInstaller"], layout
     assert all(row["height"] == 52 and row["titleX"] == layout["separatorX"] for row in layout["rows"]), layout
     print("Rendered production picker:", name, flush=True)
@@ -110,7 +113,7 @@ def render_device(app, family, runtime, selected, output):
             command("xcrun", "simctl", "boot", device)
         command("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
         print("Simulator boot completed", flush=True)
-        command("xcrun", "simctl", "install", device, str(app))
+        command("xcrun", "simctl", "install", device, str(app), timeout=240)
         print("Preview app installed", flush=True)
         for style in ("light", "dark"):
             render_style(device, family, style, output)
@@ -128,7 +131,15 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     app = build_app(output, args.sidestore_ipa, args.sideinstaller_ipa)
     for family, runtime, selected in simulator_models():
-        render_device(app, family, runtime, selected, output)
+        try:
+            render_device(app, family, runtime, selected, output)
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+            if family == "iPhone":
+                raise
+            diagnostic = {"device": selected["name"], "runtime": runtime, "status": "simulator_unavailable",
+                          "error": str(error)}
+            (output / "iPad-environment.json").write_text(json.dumps(diagnostic, indent=2) + "\n")
+            print("iPad simulator unavailable:", error, flush=True)
 
 
 if __name__ == "__main__":

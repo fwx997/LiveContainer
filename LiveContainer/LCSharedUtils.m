@@ -560,6 +560,39 @@ static void LCShowCompanionMessage(NSString *message) {
 - (void)lc_companionViewDidLayoutSubviews;
 @end
 
+@interface LCCompanionPickerBackground : UIPopoverBackgroundView
+@property(nonatomic) CGFloat arrowOffset;
+@property(nonatomic) UIPopoverArrowDirection arrowDirection;
+@property(nonatomic, strong) UIVisualEffectView *material;
+@end
+
+@implementation LCCompanionPickerBackground
+@synthesize arrowOffset = _arrowOffset, arrowDirection = _arrowDirection;
++ (CGFloat)arrowBase { return 0; }
++ (CGFloat)arrowHeight { return 0; }
++ (UIEdgeInsets)contentViewInsets { return UIEdgeInsetsZero; }
++ (BOOL)wantsDefaultContentAppearance { return NO; }
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (!self) return nil;
+    self.material = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
+    self.material.layer.cornerRadius = 18;
+    self.material.layer.cornerCurve = kCACornerCurveContinuous;
+    self.material.clipsToBounds = YES;
+    [self addSubview:self.material];
+    self.layer.shadowColor = UIColor.blackColor.CGColor;
+    self.layer.shadowOpacity = 0.16;
+    self.layer.shadowRadius = 14;
+    self.layer.shadowOffset = CGSizeMake(0, 4);
+    return self;
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    self.material.frame = self.bounds;
+    self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:18].CGPath;
+}
+@end
+
 @interface LCCompanionPicker : UITableViewController <UIPopoverPresentationControllerDelegate>
 @property(nonatomic, copy) NSArray<NSDictionary<NSString *, NSString *> *> *apps;
 @property(nonatomic, copy) NSString *currentApp;
@@ -576,8 +609,11 @@ static void LCShowCompanionMessage(NSString *message) {
     self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     self.tableView.contentInset = UIEdgeInsetsMake(6, 0, 6, 0);
     self.tableView.sectionHeaderTopPadding = 0;
+    self.tableView.layer.cornerRadius = 18;
+    self.tableView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.tableView.clipsToBounds = YES;
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 80, 0, 16);
-    self.tableView.separatorColor = [UIColor.separatorColor colorWithAlphaComponent:0.18];
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
     if (self.blockedReason.length) {
         UILabel *reason = [[UILabel alloc] initWithFrame:CGRectMake(16, 8, 248, 0)];
@@ -625,6 +661,19 @@ static void LCShowCompanionMessage(NSString *message) {
         [check.widthAnchor constraintEqualToConstant:20], [check.heightAnchor constraintEqualToConstant:20],
         [icon.widthAnchor constraintEqualToConstant:26], [icon.heightAnchor constraintEqualToConstant:26]
     ]];
+    if (indexPath.row + 1 < self.apps.count) {
+        UIView *separator = [[UIView alloc] init];
+        separator.backgroundColor = [UIColor.separatorColor colorWithAlphaComponent:0.18];
+        separator.accessibilityIdentifier = @"lc.companion.separator";
+        separator.translatesAutoresizingMaskIntoConstraints = NO;
+        [cell.contentView addSubview:separator];
+        [NSLayoutConstraint activateConstraints:@[
+            [separator.leadingAnchor constraintEqualToAnchor:name.leadingAnchor],
+            [separator.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+            [separator.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor],
+            [separator.heightAnchor constraintEqualToConstant:1 / MAX(1, self.traitCollection.displayScale)]
+        ]];
+    }
     cell.isAccessibilityElement = YES;
     cell.accessibilityLabel = selected ? [app[@"name"] stringByAppendingString:@"，当前应用"] : app[@"name"];
     cell.accessibilityHint = self.blockedReason.length ? self.blockedReason : @"切换应用";
@@ -704,7 +753,7 @@ static void LCShowCompanionMessage(NSString *message) {
     picker.modalPresentationStyle = UIModalPresentationPopover;
     [picker loadViewIfNeeded];
     UIPopoverPresentationController *popover = picker.popoverPresentationController;
-    popover.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    popover.popoverBackgroundViewClass = LCCompanionPickerBackground.class;
     popover.delegate = picker;
     popover.sourceView = sourceView;
     popover.sourceRect = sourceView.bounds;
