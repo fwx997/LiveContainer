@@ -33,24 +33,7 @@ struct LCCompanionToolbarControl: View {
 struct LCCompanionToolbarItem: ToolbarContent {
     var showHelp: (() -> Void)? = nil
 
-    @ToolbarContentBuilder
-    private var edgeSpacing: some ToolbarContent {
-        if #available(iOS 26.0, *) {
-            ToolbarItem(placement: .topBarLeading) {
-                Color.clear.frame(width: 8, height: 1).allowsHitTesting(false)
-            }
-            .sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .topBarLeading) {
-                Color.clear.frame(width: 8, height: 1).allowsHitTesting(false)
-            }
-        }
-    }
-
     var body: some ToolbarContent {
-        if LCCompanionBridge.availableApps().count > 1 {
-            edgeSpacing
-        }
         ToolbarItem(placement: .topBarLeading) {
             LCCompanionToolbarControl(showHelp: showHelp)
         }

@@ -527,7 +527,6 @@ static NSMutableDictionary<NSString *, NSString *> *LCCompanionActivities;
 static BOOL LCCompanionSwitchPending;
 static NSDictionary *LCCompanionPendingLink;
 static NSString *const LCCompanionMenuID = @"lc.companion.switch";
-static NSString *const LCCompanionSpacingID = @"lc.companion.spacing";
 
 static UIViewController *LCForegroundController(void) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
@@ -762,8 +761,7 @@ static void LCShowCompanionMessage(NSString *message) {
 
 + (NSArray<UIBarButtonItem *> *)withoutSwitcher:(NSArray<UIBarButtonItem *> *)items {
     NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(UIBarButtonItem *item, NSDictionary *bindings) {
-        return ![item.accessibilityIdentifier isEqualToString:LCCompanionMenuID]
-            && ![item.accessibilityIdentifier isEqualToString:LCCompanionSpacingID];
+        return ![item.accessibilityIdentifier isEqualToString:LCCompanionMenuID];
     }];
     return [items filteredArrayUsingPredicate:predicate] ?: @[];
 }
@@ -791,12 +789,8 @@ static void LCShowCompanionMessage(NSString *message) {
     UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:button];
     switcher.accessibilityIdentifier = LCCompanionMenuID;
     switcher.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
-    UIView *space = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 1)];
-    UIBarButtonItem *spacing = [[UIBarButtonItem alloc] initWithCustomView:space];
-    spacing.accessibilityIdentifier = LCCompanionSpacingID;
-    if (@available(iOS 26.0, *)) spacing.hidesSharedBackground = YES;
     if (isRoot || left.count != item.leftBarButtonItems.count) {
-        item.leftBarButtonItems = isRoot ? [left arrayByAddingObjectsFromArray:@[spacing, switcher]] : left;
+        item.leftBarButtonItems = isRoot ? [left arrayByAddingObject:switcher] : left;
     }
     if (!isRoot || right.count != item.rightBarButtonItems.count) {
         item.rightBarButtonItems = isRoot ? right : [right arrayByAddingObject:switcher];

@@ -64,11 +64,8 @@ static NSString *const LCCompanionMenuID = @"lc.companion.switch";
     UIButton *button = [LCCompanionBridge navigationButton];
     self.switchButton = button;
     BOOL grouped = [NSProcessInfo.processInfo.arguments containsObject:@"grouped"];
-    UIView *space = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 1)];
-    UIBarButtonItem *spacing = [[UIBarButtonItem alloc] initWithCustomView:space];
-    if (@available(iOS 26.0, *)) spacing.hidesSharedBackground = YES;
     UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:button];
-    root.navigationItem.leftBarButtonItems = @[spacing, switcher];
+    root.navigationItem.leftBarButtonItems = @[switcher];
     if (grouped) {
         self.installButton = [UIButton buttonWithType:UIButtonTypeSystem];
         [self.installButton setImage:[UIImage systemImageNamed:@"plus"] forState:UIControlStateNormal];
