@@ -560,6 +560,91 @@ static void LCShowCompanionMessage(NSString *message) {
 - (void)lc_companionViewDidLayoutSubviews;
 @end
 
+@interface LCCompanionPicker : UITableViewController <UIPopoverPresentationControllerDelegate>
+@property(nonatomic, copy) NSArray<NSDictionary<NSString *, NSString *> *> *apps;
+@property(nonatomic, copy) NSString *currentApp;
+@property(nonatomic, copy) NSString *blockedReason;
+@end
+
+@implementation LCCompanionPicker
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.tableView.scrollEnabled = NO;
+    self.tableView.rowHeight = 52;
+    self.tableView.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 54, 0, 12);
+    UILabel *heading = [[UILabel alloc] initWithFrame:CGRectMake(16, 0, 250, 36)];
+    heading.text = @"切换应用";
+    heading.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    heading.textColor = UIColor.secondaryLabelColor;
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 36)];
+    [header addSubview:heading];
+    self.tableView.tableHeaderView = header;
+    if (self.blockedReason.length) {
+        UILabel *reason = [[UILabel alloc] initWithFrame:CGRectMake(16, 8, 248, 0)];
+        reason.text = self.blockedReason;
+        reason.numberOfLines = 0;
+        reason.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        reason.textColor = UIColor.secondaryLabelColor;
+        [reason sizeToFit];
+        UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, CGRectGetMaxY(reason.frame) + 12)];
+        [footer addSubview:reason];
+        self.tableView.tableFooterView = footer;
+    }
+    self.preferredContentSize = CGSizeMake(280, 36 + self.apps.count * 52 + self.tableView.tableFooterView.bounds.size.height);
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.apps.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *app = self.apps[indexPath.row];
+    BOOL selected = [app[@"identifier"] isEqualToString:self.currentApp];
+    BOOL disabled = selected || self.blockedReason.length;
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.backgroundColor = UIColor.clearColor;
+    cell.selectionStyle = disabled ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleDefault;
+    UIImageView *check = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"checkmark"]];
+    check.contentMode = UIViewContentModeScaleAspectFit;
+    check.alpha = selected ? 1 : 0;
+    UIImageView *icon = [[UIImageView alloc] initWithImage:[LCCompanionBridge navigationIconForApp:app[@"identifier"]]];
+    UILabel *name = [[UILabel alloc] init];
+    name.text = app[@"name"];
+    name.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    name.textColor = self.blockedReason.length ? UIColor.secondaryLabelColor : UIColor.labelColor;
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[check, icon, name]];
+    row.axis = UILayoutConstraintAxisHorizontal;
+    row.alignment = UIStackViewAlignmentCenter;
+    row.spacing = 10;
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:row];
+    [NSLayoutConstraint activateConstraints:@[
+        [row.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:14],
+        [row.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
+        [row.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+        [check.widthAnchor constraintEqualToConstant:20], [check.heightAnchor constraintEqualToConstant:20],
+        [icon.widthAnchor constraintEqualToConstant:26], [icon.heightAnchor constraintEqualToConstant:26]
+    ]];
+    cell.isAccessibilityElement = YES;
+    cell.accessibilityLabel = selected ? [app[@"name"] stringByAppendingString:@"，当前应用"] : app[@"name"];
+    cell.accessibilityHint = self.blockedReason.length ? self.blockedReason : @"切换应用";
+    cell.accessibilityTraits = UIAccessibilityTraitButton | (selected ? UIAccessibilityTraitSelected : 0) | (disabled ? UIAccessibilityTraitNotEnabled : 0);
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *identifier = self.apps[indexPath.row][@"identifier"];
+    if (self.blockedReason.length || [identifier isEqualToString:self.currentApp]) return;
+    tableView.userInteractionEnabled = NO;
+    [self dismissViewControllerAnimated:YES completion:^{ [LCCompanionBridge openApp:identifier]; }];
+}
+
+- (UIModalPresentationStyle)adaptivePresentationStyleForPresentationController:(UIPresentationController *)controller traitCollection:(UITraitCollection *)traitCollection {
+    return UIModalPresentationNone;
+}
+@end
+
 @implementation LCCompanionBridge
 
 + (NSString *)currentAppIdentifier {
@@ -574,6 +659,57 @@ static void LCShowCompanionMessage(NSString *message) {
         [apps addObject:@{@"identifier": identifier, @"name": name, @"shortName": [identifier isEqualToString:@"builtinSideStore"] ? @"SS" : @"SI"}];
     }
     return apps;
+}
+
++ (UIImage *)navigationIconForApp:(NSString *)identifier {
+    NSURL *url = [LCSharedUtils builtInAppURL:identifier] ?: LCSharedUtils.hostAppBundle.bundleURL;
+    static NSCache<NSString *, UIImage *> *icons;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ icons = [NSCache new]; });
+    UIImage *cached = [icons objectForKey:url.path];
+    if (cached) return cached;
+    NSBundle *bundle = [NSBundle bundleWithURL:url];
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfURL:[url URLByAppendingPathComponent:@"Info.plist"]];
+    NSArray *names = info[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"] ?: info[@"CFBundleIconFiles"];
+    UIImage *source = nil;
+    for (NSString *name in names) {
+        source = [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil];
+        if (source) break;
+    }
+    if (!source) source = [UIImage imageNamed:@"AppIcon60x60" inBundle:bundle compatibleWithTraitCollection:nil];
+    if (!source) source = [UIImage imageNamed:@"LiveContainerIcon" inBundle:bundle compatibleWithTraitCollection:nil];
+    if (!source) source = [UIImage imageNamed:@"DefaultIcon" inBundle:bundle compatibleWithTraitCollection:nil];
+    if (!source) return [UIImage systemImageNamed:@"app"];
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(26, 26)];
+    UIImage *image = [[renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 26, 26) cornerRadius:6] addClip];
+        [source drawInRect:CGRectMake(0, 0, 26, 26)];
+    }] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    [icons setObject:image forKey:url.path];
+    return image;
+}
+
++ (UIImage *)currentNavigationIcon {
+    return [self navigationIconForApp:[self currentAppIdentifier]];
+}
+
++ (void)presentNavigationMenuFromView:(UIView *)sourceView {
+    if (!NSThread.isMainThread || !sourceView.window) return;
+    UIViewController *presenter = sourceView.window.rootViewController;
+    while (presenter.presentedViewController) presenter = presenter.presentedViewController;
+    if (!presenter || [presenter isKindOfClass:LCCompanionPicker.class]) return;
+    LCCompanionPicker *picker = [[LCCompanionPicker alloc] initWithStyle:UITableViewStylePlain];
+    picker.apps = [self availableApps];
+    picker.currentApp = [self currentAppIdentifier];
+    picker.blockedReason = [self switchBlockReason];
+    picker.modalPresentationStyle = UIModalPresentationPopover;
+    [picker loadViewIfNeeded];
+    UIPopoverPresentationController *popover = picker.popoverPresentationController;
+    popover.delegate = picker;
+    popover.sourceView = sourceView;
+    popover.sourceRect = sourceView.bounds;
+    popover.permittedArrowDirections = UIPopoverArrowDirectionUp | UIPopoverArrowDirectionDown;
+    [presenter presentViewController:picker animated:YES completion:nil];
 }
 
 + (void)setActivity:(NSString *)identifier reason:(NSString *)reason {
@@ -732,16 +868,27 @@ static void LCShowCompanionMessage(NSString *message) {
     UINavigationItem *item = top.navigationItem;
     NSArray *expectedItems = isRoot ? item.leftBarButtonItems : item.rightBarButtonItems;
     for (UIBarButtonItem *existing in expectedItems) {
-        if ([existing.accessibilityIdentifier isEqualToString:LCCompanionMenuID]) return;
+        if (![existing.accessibilityIdentifier isEqualToString:LCCompanionMenuID]) continue;
+        if ([existing.customView isKindOfClass:UIButton.class]) {
+            [(UIButton *)existing.customView setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
+        }
+        return;
     }
     NSArray *left = [self withoutSwitcher:item.leftBarButtonItems];
     NSArray *right = [self withoutSwitcher:item.rightBarButtonItems];
-    NSString *shortName = NSUserDefaults.isSideStore ? @"SS ▾" : @"LC ▾";
-    if ([NSUserDefaults.builtInAppIdentifier isEqualToString:@"builtinSideInstaller"]) shortName = @"SI ▾";
-    UIImage *image = isRoot ? nil : [UIImage systemImageNamed:@"square.grid.2x2"];
-    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithTitle:isRoot ? shortName : nil style:UIBarButtonItemStylePlain target:nil action:NULL];
-    switcher.image = image;
-    switcher.menu = [self navigationMenu];
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    [button setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
+    [NSLayoutConstraint activateConstraints:@[
+        [button.widthAnchor constraintEqualToConstant:44], [button.heightAnchor constraintEqualToConstant:44]
+    ]];
+    __weak UIButton *weakButton = button;
+    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction *action) {
+        UIButton *source = weakButton;
+        if (source) [self presentNavigationMenuFromView:source];
+    }] forControlEvents:UIControlEventTouchUpInside];
+    button.accessibilityIdentifier = LCCompanionMenuID;
+    button.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
+    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:button];
     switcher.accessibilityIdentifier = LCCompanionMenuID;
     switcher.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
     if (isRoot || left.count != item.leftBarButtonItems.count) {

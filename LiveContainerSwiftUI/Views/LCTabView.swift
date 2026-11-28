@@ -11,15 +11,19 @@ import SwiftUI
 private struct LCCompanionMenuButton: UIViewRepresentable {
     func makeUIView(context: Context) -> UIButton {
         let button = UIButton(type: .system)
-        button.setTitle("LC ▾", for: .normal)
-        button.menu = LCCompanionBridge.navigationMenu()
-        button.showsMenuAsPrimaryAction = true
+        button.setImage(LCCompanionBridge.currentNavigationIcon(), for: .normal)
+        button.addAction(UIAction { [weak button] _ in
+            guard let button else { return }
+            LCCompanionBridge.presentNavigationMenu(from: button)
+        }, for: .touchUpInside)
         button.accessibilityLabel = "切换 LiveContainer、SideStore 或 SideInstaller"
         button.accessibilityIdentifier = "lc.companion.switch"
         return button
     }
 
-    func updateUIView(_ button: UIButton, context: Context) {}
+    func updateUIView(_ button: UIButton, context: Context) {
+        button.setImage(LCCompanionBridge.currentNavigationIcon(), for: .normal)
+    }
 }
 
 struct LCCompanionToolbarItem: ToolbarContent {
@@ -28,7 +32,7 @@ struct LCCompanionToolbarItem: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             if LCCompanionBridge.availableApps().count > 1 {
-                LCCompanionMenuButton().fixedSize()
+                LCCompanionMenuButton().frame(width: 44, height: 44)
             } else if let showHelp {
                 Button("Help", systemImage: "questionmark", action: showHelp)
             }

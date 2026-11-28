@@ -52,7 +52,7 @@ class CompanionHarnessTests(unittest.TestCase):
         self.assertRegex(menu, r'(?s)installFromIpa".*?choosingIPA = true')
         self.assertRegex(menu, r'(?s)installFromUrl".*?await startInstallFromUrl\(\)')
         tabs = (views / "LCTabView.swift").read_text(encoding="utf-8")
-        self.assertIn("button.menu = LCCompanionBridge.navigationMenu()", tabs)
+        self.assertIn("LCCompanionBridge.presentNavigationMenu(from: button)", tabs)
 
     @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "macOS Foundation is required")
     def test_direct_switch_callbacks_and_active_tasks(self):
