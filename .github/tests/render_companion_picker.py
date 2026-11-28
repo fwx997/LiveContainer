@@ -44,6 +44,7 @@ def build_app(output, store, installer):
     arch = "arm64" if platform.machine() == "arm64" else "x86_64"
     command("xcrun", "--sdk", "iphonesimulator", "clang", "-fobjc-arc", "-fblocks", "-isysroot", sdk,
             "-target", f"{arch}-apple-ios17.4-simulator", "-framework", "UIKit", "-framework", "Foundation",
+            "-framework", "CoreGraphics", "-framework", "QuartzCore",
             str(source), "-o", str(app / "CompanionPickerPreview"))
     info = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleExecutable": "CompanionPickerPreview",
             "CFBundleName": "Picker Preview", "CFBundlePackageType": "APPL", "CFBundleVersion": "1",
