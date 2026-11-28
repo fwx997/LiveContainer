@@ -34,7 +34,7 @@ enum SIShortcutClient {
         try heartbeat(folder)
         let url = try launchURL(scheme: scheme, identifier: identifier)
         // This intent runs in its own extension process while LC restarts into SI.
-        try await LaunchAppExtension().openURL(launchOptions: ["url": url])
+        try await LaunchAppIntent().openURL(launchOptions: ["url": url])
         let started = ProcessInfo.processInfo.systemUptime
         while true {
             try Task.checkCancellation()

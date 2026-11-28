@@ -51,7 +51,7 @@ final class HostBundle {
     }
 }
 
-@MainActor struct LaunchAppExtension {
+@MainActor struct LaunchAppIntent {
     func openURL(launchOptions: [String: Any]) async throws {
         try Fixture.launch(launchOptions)
     }
