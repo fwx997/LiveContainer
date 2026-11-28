@@ -32,7 +32,7 @@ struct LCCompanionToolbarItem: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             if LCCompanionBridge.availableApps().count > 1 {
-                LCCompanionMenuButton().frame(width: 44, height: 44)
+                LCCompanionMenuButton().frame(width: 44, height: 44).padding(.leading, 24)
             } else if let showHelp {
                 Button("Help", systemImage: "questionmark", action: showHelp)
             }

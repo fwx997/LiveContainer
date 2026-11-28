@@ -58,8 +58,13 @@
     [root.view addSubview:background];
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setImage:[LCCompanionBridge navigationIconForApp:LCCompanionBridge.currentAppIdentifier] forState:UIControlStateNormal];
-    button.frame = CGRectMake(0, 0, 44, 44);
-    root.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:button];
+    [NSLayoutConstraint activateConstraints:@[[button.widthAnchor constraintEqualToConstant:44],
+                                               [button.heightAnchor constraintEqualToConstant:44]]];
+    UIView *spacing = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 24, 44)];
+    [spacing.widthAnchor constraintEqualToConstant:24].active = YES;
+    UIStackView *container = [[UIStackView alloc] initWithArrangedSubviews:@[spacing, button]];
+    container.axis = UILayoutConstraintAxisHorizontal;
+    root.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:container];
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.overrideUserInterfaceStyle = dark ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
     self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:root];

@@ -721,17 +721,7 @@ static void LCShowCompanionMessage(NSString *message) {
     UIPopoverPresentationController *popover = picker.popoverPresentationController;
     popover.delegate = picker;
     popover.sourceView = sourceView;
-    CGRect anchor = sourceView.bounds;
-    CGPoint center = [sourceView convertPoint:CGPointMake(CGRectGetMidX(anchor), CGRectGetMidY(anchor)) toView:sourceView.window];
-    // Keep the native glass arrow on the button, clear of the adjacent rounded corner.
-    if (center.x < 80) {
-        anchor.origin.x = CGRectGetMaxX(anchor) - 1;
-        anchor.size.width = 1;
-    } else if (center.x > sourceView.window.bounds.size.width - 80) {
-        anchor.origin.x = CGRectGetMinX(anchor);
-        anchor.size.width = 1;
-    }
-    popover.sourceRect = anchor;
+    popover.sourceRect = sourceView.bounds;
     popover.permittedArrowDirections = UIPopoverArrowDirectionUp | UIPopoverArrowDirectionDown;
     [presenter presentViewController:picker animated:YES completion:nil];
 }
@@ -893,14 +883,14 @@ static void LCShowCompanionMessage(NSString *message) {
     NSArray *expectedItems = isRoot ? item.leftBarButtonItems : item.rightBarButtonItems;
     for (UIBarButtonItem *existing in expectedItems) {
         if (![existing.accessibilityIdentifier isEqualToString:LCCompanionMenuID]) continue;
-        if ([existing.customView isKindOfClass:UIButton.class]) {
-            [(UIButton *)existing.customView setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
-        }
+        UIButton *button = (UIButton *)[existing.customView viewWithTag:7415];
+        if ([button isKindOfClass:UIButton.class]) [button setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
         return;
     }
     NSArray *left = [self withoutSwitcher:item.leftBarButtonItems];
     NSArray *right = [self withoutSwitcher:item.rightBarButtonItems];
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.tag = 7415;
     [button setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
     [NSLayoutConstraint activateConstraints:@[
         [button.widthAnchor constraintEqualToConstant:44], [button.heightAnchor constraintEqualToConstant:44]
@@ -912,7 +902,11 @@ static void LCShowCompanionMessage(NSString *message) {
     }] forControlEvents:UIControlEventTouchUpInside];
     button.accessibilityIdentifier = LCCompanionMenuID;
     button.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
-    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:button];
+    UIView *spacing = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 24, 44)];
+    [spacing.widthAnchor constraintEqualToConstant:24].active = YES;
+    UIStackView *container = [[UIStackView alloc] initWithArrangedSubviews:isRoot ? @[spacing, button] : @[button, spacing]];
+    container.axis = UILayoutConstraintAxisHorizontal;
+    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:container];
     switcher.accessibilityIdentifier = LCCompanionMenuID;
     switcher.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
     if (isRoot || left.count != item.leftBarButtonItems.count) {
