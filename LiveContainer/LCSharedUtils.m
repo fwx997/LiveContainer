@@ -564,21 +564,21 @@ static void LCShowCompanionMessage(NSString *message) {
 @property(nonatomic) CGFloat arrowOffset;
 @property(nonatomic) UIPopoverArrowDirection arrowDirection;
 @property(nonatomic, strong) UIVisualEffectView *material;
+@property(nonatomic, strong) CAShapeLayer *materialMask;
 @end
 
 @implementation LCCompanionPickerBackground
 @synthesize arrowOffset = _arrowOffset, arrowDirection = _arrowDirection;
-+ (CGFloat)arrowBase { return 0; }
-+ (CGFloat)arrowHeight { return 0; }
++ (CGFloat)arrowBase { return 16; }
++ (CGFloat)arrowHeight { return 8; }
 + (UIEdgeInsets)contentViewInsets { return UIEdgeInsetsZero; }
 + (BOOL)wantsDefaultContentAppearance { return NO; }
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (!self) return nil;
     self.material = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    self.material.layer.cornerRadius = 18;
-    self.material.layer.cornerCurve = kCACornerCurveContinuous;
-    self.material.clipsToBounds = YES;
+    self.materialMask = [CAShapeLayer layer];
+    self.material.layer.mask = self.materialMask;
     [self addSubview:self.material];
     self.layer.shadowColor = UIColor.blackColor.CGColor;
     self.layer.shadowOpacity = 0.16;
@@ -586,10 +586,41 @@ static void LCShowCompanionMessage(NSString *message) {
     self.layer.shadowOffset = CGSizeMake(0, 4);
     return self;
 }
+- (void)setArrowOffset:(CGFloat)arrowOffset {
+    _arrowOffset = arrowOffset;
+    [self setNeedsLayout];
+}
+- (void)setArrowDirection:(UIPopoverArrowDirection)arrowDirection {
+    _arrowDirection = arrowDirection;
+    [self setNeedsLayout];
+}
 - (void)layoutSubviews {
     [super layoutSubviews];
     self.material.frame = self.bounds;
-    self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:18].CGPath;
+    CGRect body = self.bounds;
+    BOOL pointsUp = self.arrowDirection == UIPopoverArrowDirectionUp;
+    BOOL pointsDown = self.arrowDirection == UIPopoverArrowDirectionDown;
+    CGFloat arrowHeight = [LCCompanionPickerBackground arrowHeight];
+    CGFloat halfBase = [LCCompanionPickerBackground arrowBase] / 2;
+    if (pointsUp || pointsDown) body.size.height -= arrowHeight;
+    if (pointsUp) body.origin.y += arrowHeight;
+    UIBezierPath *shape = [UIBezierPath bezierPathWithRoundedRect:body cornerRadius:18];
+    if (pointsUp || pointsDown) {
+        CGFloat cornerClearance = 18 + halfBase + 2;
+        CGFloat center = MIN(CGRectGetMaxX(body) - cornerClearance,
+                             MAX(CGRectGetMinX(body) + cornerClearance, CGRectGetMidX(body) + self.arrowOffset));
+        CGFloat baseY = pointsUp ? CGRectGetMinY(body) + 0.5 : CGRectGetMaxY(body) - 0.5;
+        CGFloat tipY = pointsUp ? CGRectGetMinY(self.bounds) : CGRectGetMaxY(self.bounds);
+        UIBezierPath *arrow = [UIBezierPath bezierPath];
+        [arrow moveToPoint:CGPointMake(center - halfBase, baseY)];
+        [arrow addLineToPoint:pointsUp ? CGPointMake(center, tipY) : CGPointMake(center + halfBase, baseY)];
+        [arrow addLineToPoint:pointsUp ? CGPointMake(center + halfBase, baseY) : CGPointMake(center, tipY)];
+        [arrow closePath];
+        [shape appendPath:arrow];
+    }
+    self.materialMask.frame = self.material.bounds;
+    self.materialMask.path = shape.CGPath;
+    self.layer.shadowPath = shape.CGPath;
 }
 @end
 

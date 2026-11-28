@@ -100,6 +100,7 @@ def render_style(device, family, style, output):
     assert layout["headerHeight"] == layout["footerHeight"] == 12 and layout["contentHeight"] == 180, layout
     assert layout["topInset"] == layout["adjustedTopInset"] == 0, layout
     assert layout["separatorCount"] == 2, layout
+    assert layout["arrowHeight"] == 8 and layout["arrowBase"] == 16, layout
     assert [row["title"] for row in layout["rows"]] == ["LiveContainer", "SideStore", "SideInstaller"], layout
     assert all(row["height"] == 52 and row["titleX"] == layout["separatorX"] for row in layout["rows"]), layout
     assert all(row["leftMargin"] == row["rightMargin"] == 12 for row in layout["rows"]), layout
