@@ -527,6 +527,7 @@ static NSMutableDictionary<NSString *, NSString *> *LCCompanionActivities;
 static BOOL LCCompanionSwitchPending;
 static NSDictionary *LCCompanionPendingLink;
 static NSString *const LCCompanionMenuID = @"lc.companion.switch";
+static NSString *const LCCompanionSpacingID = @"lc.companion.spacing";
 
 static UIViewController *LCForegroundController(void) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
@@ -866,7 +867,8 @@ static void LCShowCompanionMessage(NSString *message) {
 
 + (NSArray<UIBarButtonItem *> *)withoutSwitcher:(NSArray<UIBarButtonItem *> *)items {
     NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(UIBarButtonItem *item, NSDictionary *bindings) {
-        return ![item.accessibilityIdentifier isEqualToString:LCCompanionMenuID];
+        return ![item.accessibilityIdentifier isEqualToString:LCCompanionMenuID]
+            && ![item.accessibilityIdentifier isEqualToString:LCCompanionSpacingID];
     }];
     return [items filteredArrayUsingPredicate:predicate] ?: @[];
 }
@@ -883,14 +885,14 @@ static void LCShowCompanionMessage(NSString *message) {
     NSArray *expectedItems = isRoot ? item.leftBarButtonItems : item.rightBarButtonItems;
     for (UIBarButtonItem *existing in expectedItems) {
         if (![existing.accessibilityIdentifier isEqualToString:LCCompanionMenuID]) continue;
-        UIButton *button = (UIButton *)[existing.customView viewWithTag:7415];
-        if ([button isKindOfClass:UIButton.class]) [button setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
+        if ([existing.customView isKindOfClass:UIButton.class]) {
+            [(UIButton *)existing.customView setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
+        }
         return;
     }
     NSArray *left = [self withoutSwitcher:item.leftBarButtonItems];
     NSArray *right = [self withoutSwitcher:item.rightBarButtonItems];
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.tag = 7415;
     [button setImage:[self currentNavigationIcon] forState:UIControlStateNormal];
     [NSLayoutConstraint activateConstraints:@[
         [button.widthAnchor constraintEqualToConstant:44], [button.heightAnchor constraintEqualToConstant:44]
@@ -902,15 +904,15 @@ static void LCShowCompanionMessage(NSString *message) {
     }] forControlEvents:UIControlEventTouchUpInside];
     button.accessibilityIdentifier = LCCompanionMenuID;
     button.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
-    UIView *spacing = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 24, 44)];
-    [spacing.widthAnchor constraintEqualToConstant:24].active = YES;
-    UIStackView *container = [[UIStackView alloc] initWithArrangedSubviews:isRoot ? @[spacing, button] : @[button, spacing]];
-    container.axis = UILayoutConstraintAxisHorizontal;
-    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:container];
+    UIBarButtonItem *switcher = [[UIBarButtonItem alloc] initWithCustomView:button];
     switcher.accessibilityIdentifier = LCCompanionMenuID;
     switcher.accessibilityLabel = @"切换 LiveContainer、SideStore 或 SideInstaller";
+    UIView *space = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 24, 1)];
+    UIBarButtonItem *spacing = [[UIBarButtonItem alloc] initWithCustomView:space];
+    spacing.accessibilityIdentifier = LCCompanionSpacingID;
+    if (@available(iOS 26.0, *)) spacing.hidesSharedBackground = YES;
     if (isRoot || left.count != item.leftBarButtonItems.count) {
-        item.leftBarButtonItems = isRoot ? [left arrayByAddingObject:switcher] : left;
+        item.leftBarButtonItems = isRoot ? [left arrayByAddingObjectsFromArray:@[spacing, switcher]] : left;
     }
     if (!isRoot || right.count != item.rightBarButtonItems.count) {
         item.rightBarButtonItems = isRoot ? right : [right arrayByAddingObject:switcher];

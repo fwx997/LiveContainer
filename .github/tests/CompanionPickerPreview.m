@@ -60,11 +60,10 @@
     [button setImage:[LCCompanionBridge navigationIconForApp:LCCompanionBridge.currentAppIdentifier] forState:UIControlStateNormal];
     [NSLayoutConstraint activateConstraints:@[[button.widthAnchor constraintEqualToConstant:44],
                                                [button.heightAnchor constraintEqualToConstant:44]]];
-    UIView *spacing = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 24, 44)];
-    [spacing.widthAnchor constraintEqualToConstant:24].active = YES;
-    UIStackView *container = [[UIStackView alloc] initWithArrangedSubviews:@[spacing, button]];
-    container.axis = UILayoutConstraintAxisHorizontal;
-    root.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:container];
+    UIView *space = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 24, 1)];
+    UIBarButtonItem *spacing = [[UIBarButtonItem alloc] initWithCustomView:space];
+    if (@available(iOS 26.0, *)) spacing.hidesSharedBackground = YES;
+    root.navigationItem.leftBarButtonItems = @[spacing, [[UIBarButtonItem alloc] initWithCustomView:button]];
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.overrideUserInterfaceStyle = dark ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
     self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:root];

@@ -29,10 +29,27 @@ private struct LCCompanionMenuButton: UIViewRepresentable {
 struct LCCompanionToolbarItem: ToolbarContent {
     var showHelp: (() -> Void)? = nil
 
+    @ToolbarContentBuilder
+    private var edgeSpacing: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .topBarLeading) {
+                Color.clear.frame(width: 24, height: 1).allowsHitTesting(false)
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarLeading) {
+                Color.clear.frame(width: 24, height: 1).allowsHitTesting(false)
+            }
+        }
+    }
+
     var body: some ToolbarContent {
+        if LCCompanionBridge.availableApps().count > 1 {
+            edgeSpacing
+        }
         ToolbarItem(placement: .topBarLeading) {
             if LCCompanionBridge.availableApps().count > 1 {
-                LCCompanionMenuButton().frame(width: 44, height: 44).padding(.leading, 24)
+                LCCompanionMenuButton().frame(width: 44, height: 44)
             } else if let showHelp {
                 Button("Help", systemImage: "questionmark", action: showHelp)
             }
