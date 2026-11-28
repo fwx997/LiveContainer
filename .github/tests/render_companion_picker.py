@@ -97,11 +97,12 @@ def render_style(device, family, style, output):
     command("xcrun", "simctl", "terminate", device, BUNDLE_ID)
     layout_file.unlink()
     assert layout["popover"], layout
-    assert layout["headerHeight"] == 0 and layout["contentHeight"] == 168, layout
-    assert layout["topInset"] == layout["adjustedTopInset"] == 6, layout
+    assert layout["headerHeight"] == layout["footerHeight"] == 12 and layout["contentHeight"] == 180, layout
+    assert layout["topInset"] == layout["adjustedTopInset"] == 0, layout
     assert layout["separatorCount"] == 2, layout
     assert [row["title"] for row in layout["rows"]] == ["LiveContainer", "SideStore", "SideInstaller"], layout
     assert all(row["height"] == 52 and row["titleX"] == layout["separatorX"] for row in layout["rows"]), layout
+    assert all(row["leftMargin"] == row["rightMargin"] == 12 for row in layout["rows"]), layout
     print("Rendered production picker:", name, flush=True)
 
 

@@ -607,16 +607,17 @@ static void LCShowCompanionMessage(NSString *message) {
     self.tableView.backgroundColor = UIColor.clearColor;
     self.tableView.opaque = NO;
     self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
-    self.tableView.contentInset = UIEdgeInsetsMake(6, 0, 6, 0);
+    self.tableView.contentInset = UIEdgeInsetsZero;
     self.tableView.sectionHeaderTopPadding = 0;
     self.tableView.layer.cornerRadius = 18;
     self.tableView.layer.cornerCurve = kCACornerCurveContinuous;
     self.tableView.clipsToBounds = YES;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.separatorInset = UIEdgeInsetsMake(0, 80, 0, 16);
-    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 78, 0, 12);
+    self.tableView.tableHeaderView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 12)];
+    self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 12)];
     if (self.blockedReason.length) {
-        UILabel *reason = [[UILabel alloc] initWithFrame:CGRectMake(16, 8, 248, 0)];
+        UILabel *reason = [[UILabel alloc] initWithFrame:CGRectMake(12, 12, 256, 0)];
         reason.text = self.blockedReason;
         reason.numberOfLines = 0;
         reason.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
@@ -626,7 +627,7 @@ static void LCShowCompanionMessage(NSString *message) {
         [footer addSubview:reason];
         self.tableView.tableFooterView = footer;
     }
-    self.preferredContentSize = CGSizeMake(280, 12 + self.apps.count * 52 + self.tableView.tableFooterView.bounds.size.height);
+    self.preferredContentSize = CGSizeMake(280, self.tableView.tableHeaderView.bounds.size.height + self.apps.count * 52 + self.tableView.tableFooterView.bounds.size.height);
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -655,8 +656,8 @@ static void LCShowCompanionMessage(NSString *message) {
     row.translatesAutoresizingMaskIntoConstraints = NO;
     [cell.contentView addSubview:row];
     [NSLayoutConstraint activateConstraints:@[
-        [row.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:14],
-        [row.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16],
+        [row.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
+        [row.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
         [row.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
         [check.widthAnchor constraintEqualToConstant:20], [check.heightAnchor constraintEqualToConstant:20],
         [icon.widthAnchor constraintEqualToConstant:26], [icon.heightAnchor constraintEqualToConstant:26]

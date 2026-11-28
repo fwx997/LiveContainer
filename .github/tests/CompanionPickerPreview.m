@@ -81,7 +81,8 @@
         UIStackView *row = (UIStackView *)cell.contentView.subviews.firstObject;
         UILabel *name = (UILabel *)row.arrangedSubviews.lastObject;
         CGRect nameFrame = [name convertRect:name.bounds toView:cell.contentView];
-        [rows addObject:@{@"title": name.text, @"height": @(cell.bounds.size.height), @"titleX": @(nameFrame.origin.x)}];
+        [rows addObject:@{@"title": name.text, @"height": @(cell.bounds.size.height), @"titleX": @(nameFrame.origin.x),
+                         @"leftMargin": @(row.frame.origin.x), @"rightMargin": @(cell.contentView.bounds.size.width - CGRectGetMaxX(row.frame))}];
         for (UIView *view in cell.contentView.subviews) {
             if ([view.accessibilityIdentifier isEqualToString:@"lc.companion.separator"]) separators++;
         }
@@ -89,6 +90,7 @@
     NSDictionary *result = @{
         @"rows": rows,
         @"headerHeight": @(picker.tableView.tableHeaderView.bounds.size.height),
+        @"footerHeight": @(picker.tableView.tableFooterView.bounds.size.height),
         @"contentHeight": @(picker.preferredContentSize.height),
         @"topInset": @(picker.tableView.contentInset.top),
         @"adjustedTopInset": @(picker.tableView.adjustedContentInset.top),
