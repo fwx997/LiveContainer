@@ -1,11 +1,13 @@
 """Verify full-app embedding, system declarations, and downgrade rejection."""
 
 from pathlib import Path
+import hashlib
 import json
 import plistlib
 import sys
 import tempfile
 import unittest
+import warnings
 from unittest.mock import patch
 import zipfile
 
@@ -56,6 +58,7 @@ class ThreeAppPackagingTests(unittest.TestCase):
         self.actions_path.write_text(json.dumps({"actions": actions, "queries": {
             "SISavedPlaceQuery": {}, "SISideloadedAppQuery": {}}}))
         self.installer = self.root / "SideInstaller.ipa"
+        self.recovery_binary = b"\x7fELF\x02\x01" + b"fixture recovery installer"
         with zipfile.ZipFile(self.installer, "w") as archive:
             base = "Payload/SideInstaller.app/"
             archive.writestr(base + "Info.plist", plistlib.dumps(self.guest_info))
@@ -64,6 +67,8 @@ class ThreeAppPackagingTests(unittest.TestCase):
             archive.writestr(base + "zh-Hans.lproj/Localizable.strings", b"original translations")
             write_bundle(archive, base + "PlugIns/SideInstallerLiveActivity.appex",
                          "com.frizzlem.sideinstaller.LiveActivity", macho(2), {})
+            archive.writestr("CertificateReuseBuild/siboot-aarch64", self.recovery_binary)
+            archive.writestr("CertificateReuseBuild/SHA256SUMS", hashlib.sha256(self.recovery_binary).hexdigest() + "  siboot-aarch64\n")
         self.sidestore = self.root / "SideStore.ipa"
         with zipfile.ZipFile(self.sidestore, "w") as archive:
             write_bundle(archive, "Payload/SideStore.app", "com.SideStore.SideStore", macho(2), {"a": "中文"})
@@ -102,6 +107,35 @@ class ThreeAppPackagingTests(unittest.TestCase):
         self.assertEqual((guest / "zh-Hans.lproj/Localizable.strings").read_bytes(), b"original translations")
         self.assertFalse((guest / "PlugIns/SideInstallerLiveActivity.appex").exists())
         self.assertEqual(verify_combined(self.package(), self.sidestore, self.installer), "1.0+abcdef12")
+
+    def test_recovery_bundle_contains_matching_installer_and_scripts(self):
+        self.embed_installer()
+        recovery = self.host / "Recovery"
+        self.assertEqual((recovery / "siboot-aarch64").read_bytes(), self.recovery_binary)
+        info = plistlib.loads((self.host / "Info.plist").read_bytes())
+        self.assertEqual(info["LCRecoveryBootstrapSHA256"], hashlib.sha256(self.recovery_binary).hexdigest())
+        self.assertEqual(info["LCRecoveryFormatVersion"], 1)
+        for name in ("install.sh", "install-local.sh"):
+            source = Path(__file__).resolve().parents[1] / "recovery" / name
+            self.assertEqual((recovery / name).read_bytes(), source.read_bytes().replace(b"\r\n", b"\n"))
+
+    def test_recovery_installer_hash_mismatch_is_rejected(self):
+        with warnings.catch_warnings(), zipfile.ZipFile(self.installer, "a") as archive:
+            warnings.simplefilter("ignore", UserWarning)
+            archive.writestr("CertificateReuseBuild/SHA256SUMS", "0" * 64 + "  siboot-aarch64\n")
+        with self.assertRaisesRegex(ValueError, "recovery installer failed"):
+            self.embed_installer()
+
+    def test_missing_or_corrupt_recovery_files_reject_the_final_ipa(self):
+        self.embed_installer()
+        core = self.host / "Recovery/siboot-aarch64"
+        core.write_bytes(b"corrupt core")
+        with self.assertRaisesRegex(ValueError, "offline recovery installer"):
+            verify_combined(self.package(), self.sidestore, self.installer)
+        core.write_bytes(self.recovery_binary)
+        (self.host / "Recovery/install-local.sh").unlink()
+        with self.assertRaisesRegex(ValueError, "IPA is missing"):
+            verify_combined(self.package(), self.sidestore, self.installer)
 
     def test_host_preserves_existing_modes_and_owns_background_tasks(self):
         result = merge_info(dict(self.host_info), self.guest_info, self.update)

@@ -1,6 +1,7 @@
 """Reject incomplete SideStore conversions before publishing a combined IPA."""
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import plistlib
@@ -178,6 +179,8 @@ def verify_combined(combined_path, sidestore_path, sideinstaller_path=None):
     with zipfile.ZipFile(sidestore_path) as sidestore, zipfile.ZipFile(combined_path) as combined:
         ss_root, ss_info = main_bundle(sidestore, "com.SideStore.SideStore")
         lc_root, lc_info = main_bundle(combined, "com.kdt.livecontainer")
+        if lc_info.get("LCRecoveryFormatVersion") == 1:
+            verify_recovery(combined, lc_root, lc_info)
         embedded_root = lc_root + "/Frameworks/SideStoreApp.framework"
         embedded_info, executable = bundle(combined, embedded_root)
         for key in ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion"):
@@ -197,6 +200,19 @@ def verify_combined(combined_path, sidestore_path, sideinstaller_path=None):
         elif has_installer or "SideInstaller" in lc_info.get("LCEmbeddedApps", []):
             raise ValueError("A three-app package requires its SideInstaller source for verification")
     return ss_info["CFBundleShortVersionString"]
+
+
+def verify_recovery(archive, root, info):
+    recovery = root + "/Recovery/"
+    binary = read_required(archive, recovery + "siboot-aarch64")
+    if not binary.startswith(b"\x7fELF\x02\x01") or hashlib.sha256(binary).hexdigest() != info.get("LCRecoveryBootstrapSHA256"):
+        raise ValueError("The offline recovery installer does not match its embedded hash")
+    installer = read_required(archive, recovery + "install.sh")
+    entry = read_required(archive, recovery + "install-local.sh")
+    if any(token not in installer for token in (b"__BUILD__", b"__IPA_SHA256__", b"__CORE_SHA256__")):
+        raise ValueError("The recovery installer template cannot bind the current IPA")
+    if b"LiveContainer-triple-local.zip" not in entry or b"\r" in installer + entry:
+        raise ValueError("The recovery entry must use the fixed ZIP and Unix line endings")
 
 
 def main():

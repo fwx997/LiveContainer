@@ -1,6 +1,7 @@
 """Embed the complete SideInstaller application in a LiveContainer build."""
 
 import argparse
+import hashlib
 from pathlib import Path, PurePosixPath
 import plistlib
 import shutil
@@ -109,6 +110,27 @@ def synchronize_extension_versions(host, host_info):
         path.write_bytes(plistlib.dumps(info))
 
 
+def embed_recovery(archive, host, host_info):
+    """Keep the matching installer with the IPA so recovery never redownloads it."""
+    prefix = "CertificateReuseBuild/"
+    try:
+        binary = archive.read(prefix + "siboot-aarch64")
+        expected = archive.read(prefix + "SHA256SUMS").decode().split()[0]
+    except (KeyError, UnicodeDecodeError, IndexError) as error:
+        raise ValueError("The SideInstaller transport has no verified recovery installer") from error
+    digest = hashlib.sha256(binary).hexdigest()
+    if digest != expected or not binary.startswith(b"\x7fELF\x02\x01"):
+        raise ValueError("The embedded recovery installer failed verification")
+    destination = host / "Recovery"
+    destination.mkdir()
+    (destination / "siboot-aarch64").write_bytes(binary)
+    for name in ("install.sh", "install-local.sh"):
+        source = Path(__file__).parent / "recovery" / name
+        (destination / name).write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
+    host_info["LCRecoveryBootstrapSHA256"] = digest
+    host_info["LCRecoveryFormatVersion"] = 1
+
+
 def embed(ipa, host, converter, update_url, license_path):
     info_path = host / "Info.plist"
     host_info = plistlib.loads(info_path.read_bytes())
@@ -120,6 +142,7 @@ def embed(ipa, host, converter, update_url, license_path):
         with zipfile.ZipFile(ipa) as archive:
             root, guest_info = main_bundle(archive, IDENTIFIER)
             extract_payload(archive, root, source)
+            embed_recovery(archive, host, host_info)
         executable = source / guest_info["CFBundleExecutable"]
         converted = executable.with_suffix(".dylib")
         subprocess.run([str(converter), str(executable), str(converted)], check=True)

@@ -281,6 +281,9 @@ struct LCSettingsView: View {
                     } label: {
                         Text("lc.settings.dataManagement".loc)
                     }
+                    if LCSharedUtils.hostAppBundle().object(forInfoDictionaryKey: "LCRecoveryFormatVersion") != nil {
+                        NavigationLink("本地恢复备份") { LCRecoveryBackupView() }
+                    }
                 }
                 
                 Section {

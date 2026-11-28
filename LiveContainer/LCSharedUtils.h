@@ -25,6 +25,16 @@
 + (BOOL)builtInAppExists:(NSString *)identifier;
 @end
 
+// Recovery files live in the host's shared container, including during self update.
+@interface LCRecoveryBackup : NSObject
++ (NSDictionary<NSString *, id> * _Nonnull)status NS_SWIFT_NAME(status());
++ (BOOL)configureDirectory:(NSURL * _Nonnull)directory error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(configureDirectory(_:));
++ (void)setAutomatic:(BOOL)enabled NS_SWIFT_NAME(setAutomatic(_:));
++ (BOOL)captureIPA:(NSURL * _Nonnull)ipa bundleURL:(NSURL * _Nonnull)bundleURL error:(NSError * _Nullable * _Nullable)error;
++ (void)saveWithCompletion:(void (^ _Nonnull)(NSError * _Nullable error))completion NS_SWIFT_NAME(saveWithCompletion(_:));
++ (void)saveAutomaticallyWithCompletion:(void (^ _Nonnull)(NSError * _Nullable error))completion NS_SWIFT_NAME(saveAutomaticallyWithCompletion(_:));
+@end
+
 // Main-thread bridge shared by the three separately loaded applications.
 @class UIMenu, UIImage, UIButton;
 @interface LCCompanionBridge : NSObject
