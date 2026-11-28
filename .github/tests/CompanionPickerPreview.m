@@ -96,8 +96,9 @@
         @"adjustedTopInset": @(picker.tableView.adjustedContentInset.top),
         @"separatorX": @(picker.tableView.separatorInset.left),
         @"separatorCount": @(separators),
-        @"arrowHeight": @([LCCompanionPickerBackground arrowHeight]),
-        @"arrowBase": @([LCCompanionPickerBackground arrowBase]),
+        @"nativePopoverBackground": @(picker.popoverPresentationController.popoverBackgroundViewClass == Nil),
+        @"tableBackgroundAlpha": @(CGColorGetAlpha(picker.tableView.backgroundColor.CGColor)),
+        @"arrowDirection": @(picker.popoverPresentationController.arrowDirection),
         @"popover": @([picker.presentationController isKindOfClass:UIPopoverPresentationController.class]),
         @"pickerFrame": NSStringFromCGRect([picker.view convertRect:picker.view.bounds toView:self.window])
     };

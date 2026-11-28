@@ -23,7 +23,7 @@ def command(*arguments, timeout=120):
 
 def production_source():
     source = (ROOT / "LiveContainer/LCSharedUtils.m").read_text(encoding="utf-8")
-    start = source.index("@interface LCCompanionPickerBackground :")
+    start = source.index("@interface LCCompanionPicker :")
     end = source.index("@implementation LCCompanionBridge", start)
     presentation = production_method(source, "+ (void)presentNavigationMenuFromView:")
     fixture = Path(__file__).with_name("CompanionPickerPreview.m").read_text(encoding="utf-8")
@@ -100,7 +100,8 @@ def render_style(device, family, style, output):
     assert layout["headerHeight"] == layout["footerHeight"] == 12 and layout["contentHeight"] == 180, layout
     assert layout["topInset"] == layout["adjustedTopInset"] == 0, layout
     assert layout["separatorCount"] == 2, layout
-    assert layout["arrowHeight"] == 8 and layout["arrowBase"] == 16, layout
+    assert layout["nativePopoverBackground"] and layout["tableBackgroundAlpha"] == 0, layout
+    assert layout["arrowDirection"] in (1, 2), layout
     assert [row["title"] for row in layout["rows"]] == ["LiveContainer", "SideStore", "SideInstaller"], layout
     assert all(row["height"] == 52 and row["titleX"] == layout["separatorX"] for row in layout["rows"]), layout
     assert all(row["leftMargin"] == row["rightMargin"] == 12 for row in layout["rows"]), layout

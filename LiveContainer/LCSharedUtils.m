@@ -560,70 +560,6 @@ static void LCShowCompanionMessage(NSString *message) {
 - (void)lc_companionViewDidLayoutSubviews;
 @end
 
-@interface LCCompanionPickerBackground : UIPopoverBackgroundView
-@property(nonatomic) CGFloat arrowOffset;
-@property(nonatomic) UIPopoverArrowDirection arrowDirection;
-@property(nonatomic, strong) UIVisualEffectView *material;
-@property(nonatomic, strong) CAShapeLayer *materialMask;
-@end
-
-@implementation LCCompanionPickerBackground
-@synthesize arrowOffset = _arrowOffset, arrowDirection = _arrowDirection;
-+ (CGFloat)arrowBase { return 16; }
-+ (CGFloat)arrowHeight { return 8; }
-+ (UIEdgeInsets)contentViewInsets { return UIEdgeInsetsZero; }
-+ (BOOL)wantsDefaultContentAppearance { return NO; }
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (!self) return nil;
-    self.material = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial]];
-    self.materialMask = [CAShapeLayer layer];
-    self.material.layer.mask = self.materialMask;
-    [self addSubview:self.material];
-    self.layer.shadowColor = UIColor.blackColor.CGColor;
-    self.layer.shadowOpacity = 0.16;
-    self.layer.shadowRadius = 14;
-    self.layer.shadowOffset = CGSizeMake(0, 4);
-    return self;
-}
-- (void)setArrowOffset:(CGFloat)arrowOffset {
-    _arrowOffset = arrowOffset;
-    [self setNeedsLayout];
-}
-- (void)setArrowDirection:(UIPopoverArrowDirection)arrowDirection {
-    _arrowDirection = arrowDirection;
-    [self setNeedsLayout];
-}
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    self.material.frame = self.bounds;
-    CGRect body = self.bounds;
-    BOOL pointsUp = self.arrowDirection == UIPopoverArrowDirectionUp;
-    BOOL pointsDown = self.arrowDirection == UIPopoverArrowDirectionDown;
-    CGFloat arrowHeight = [LCCompanionPickerBackground arrowHeight];
-    CGFloat halfBase = [LCCompanionPickerBackground arrowBase] / 2;
-    if (pointsUp || pointsDown) body.size.height -= arrowHeight;
-    if (pointsUp) body.origin.y += arrowHeight;
-    UIBezierPath *shape = [UIBezierPath bezierPathWithRoundedRect:body cornerRadius:18];
-    if (pointsUp || pointsDown) {
-        CGFloat cornerClearance = 18 + halfBase + 2;
-        CGFloat center = MIN(CGRectGetMaxX(body) - cornerClearance,
-                             MAX(CGRectGetMinX(body) + cornerClearance, CGRectGetMidX(body) + self.arrowOffset));
-        CGFloat baseY = pointsUp ? CGRectGetMinY(body) + 0.5 : CGRectGetMaxY(body) - 0.5;
-        CGFloat tipY = pointsUp ? CGRectGetMinY(self.bounds) : CGRectGetMaxY(self.bounds);
-        UIBezierPath *arrow = [UIBezierPath bezierPath];
-        [arrow moveToPoint:CGPointMake(center - halfBase, baseY)];
-        [arrow addLineToPoint:pointsUp ? CGPointMake(center, tipY) : CGPointMake(center + halfBase, baseY)];
-        [arrow addLineToPoint:pointsUp ? CGPointMake(center + halfBase, baseY) : CGPointMake(center, tipY)];
-        [arrow closePath];
-        [shape appendPath:arrow];
-    }
-    self.materialMask.frame = self.material.bounds;
-    self.materialMask.path = shape.CGPath;
-    self.layer.shadowPath = shape.CGPath;
-}
-@end
-
 @interface LCCompanionPicker : UITableViewController <UIPopoverPresentationControllerDelegate>
 @property(nonatomic, copy) NSArray<NSDictionary<NSString *, NSString *> *> *apps;
 @property(nonatomic, copy) NSString *currentApp;
@@ -636,13 +572,11 @@ static void LCShowCompanionMessage(NSString *message) {
     self.tableView.scrollEnabled = NO;
     self.tableView.rowHeight = 52;
     self.tableView.backgroundColor = UIColor.clearColor;
+    self.tableView.backgroundView = nil;
     self.tableView.opaque = NO;
     self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     self.tableView.contentInset = UIEdgeInsetsZero;
     self.tableView.sectionHeaderTopPadding = 0;
-    self.tableView.layer.cornerRadius = 18;
-    self.tableView.layer.cornerCurve = kCACornerCurveContinuous;
-    self.tableView.clipsToBounds = YES;
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 78, 0, 12);
     self.tableView.tableHeaderView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 280, 12)];
@@ -785,7 +719,6 @@ static void LCShowCompanionMessage(NSString *message) {
     picker.modalPresentationStyle = UIModalPresentationPopover;
     [picker loadViewIfNeeded];
     UIPopoverPresentationController *popover = picker.popoverPresentationController;
-    popover.popoverBackgroundViewClass = LCCompanionPickerBackground.class;
     popover.delegate = picker;
     popover.sourceView = sourceView;
     popover.sourceRect = sourceView.bounds;
